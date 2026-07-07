@@ -7,7 +7,7 @@
 //     .then(b => console.log([...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('')))
 // und unten bei PASS_HASH eintragen.
 (function () {
-  const PASS_HASH = '3a60f2810ad73954c82b96bf86f30f2df62d443164eda7c49e84bc99b71135b2';
+  const PASS_HASH = '1fb20d680c59e1bd7f709bd0a8eb494594101415d782a845799d46e3f7f340d6';
   const KEY = 'wearclothing.unlock';
 
   if (localStorage.getItem(KEY) === PASS_HASH) return; // Gerät ist bereits freigeschaltet
