@@ -2,7 +2,7 @@
 import { analyzeOutfit } from './advisor.js';
 import { icon, TYPE_ICON } from './icons.js';
 import { analyzeItem, TYPE_LABEL } from './detect.js';
-import { buildPrompt, generateTryOn } from './tryon.js';
+import { buildPrompt, generateTryOn, aiAnalyzeItem } from './tryon.js';
 
 /* ---------- Zustand & Speicher (bleibt lokal auf dem Gerät) ---------- */
 
@@ -34,11 +34,13 @@ const SLOTS = {
   jacke: { label: 'Jacke', types: ['jacke'] },
   hose: { label: 'Hose / Rock', types: ['hose', 'shorts', 'rock'] },
   schuhe: { label: 'Schuhe', types: ['schuhe'] },
+  socken: { label: 'Socken', types: ['socken'] },
+  unterwaesche: { label: 'Unterwäsche', types: ['unterwaesche'] },
   uhr: { label: 'Uhr', types: ['uhr'] },
   kette: { label: 'Kette', types: ['kette'] },
 };
 const slotOf = (type) => Object.keys(SLOTS).find((s) => SLOTS[s].types.includes(type));
-const slotActions = { oberteil: 'keep', jacke: 'keep', hose: 'keep', schuhe: 'keep', uhr: 'keep', kette: 'keep' };
+const slotActions = Object.fromEntries(Object.keys(SLOTS).map((s) => [s, 'keep']));
 
 const $ = (sel) => document.querySelector(sel);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -191,6 +193,9 @@ $('#btn-save-profile').addEventListener('click', () => {
 
 let pendingImage = null;
 let pendingImageColor = null;
+let pendingMeta = { colorName: null, size: null, dimensions: null, brand: null };
+let detectSeq = 0;
+let linkDebounce = null;
 
 $('#c-image').addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -202,17 +207,12 @@ $('#c-image').addEventListener('change', async (e) => {
   runDetection();
 });
 
-$('#c-link').addEventListener('input', () => runDetection());
+$('#c-link').addEventListener('input', () => {
+  clearTimeout(linkDebounce);
+  linkDebounce = setTimeout(runDetection, 600);
+});
 
-function runDetection() {
-  const link = $('#c-link').value.trim();
-  if (!link && !pendingImage) { $('#c-detected').classList.add('hidden'); return; }
-
-  const result = analyzeItem(link, pendingImageColor);
-  $('#c-name').value = result.name;
-  $('#c-type').value = result.type;
-  $('#c-color').value = result.color;
-
+function renderDetected({ name, type, color, statusText }) {
   const box = $('#c-detected');
   box.classList.remove('hidden');
   const thumb = $('#d-thumb');
@@ -221,14 +221,51 @@ function runDetection() {
     thumb.innerHTML = '';
   } else {
     thumb.style.backgroundImage = 'none';
-    thumb.style.background = result.color;
-    thumb.innerHTML = icon(TYPE_ICON[result.type] || 'shirt', 26);
+    thumb.style.background = color;
+    thumb.innerHTML = icon(TYPE_ICON[type] || 'shirt', 26);
   }
-  $('#d-name').textContent = result.name;
+  $('#d-name').textContent = name;
+  const bits = [TYPE_LABEL[type]];
+  if (pendingMeta.colorName) bits.push(pendingMeta.colorName);
+  if (pendingMeta.size) bits.push('Größe ' + pendingMeta.size);
+  if (pendingMeta.brand) bits.push(pendingMeta.brand);
+  if (pendingMeta.dimensions) bits.push(pendingMeta.dimensions);
   $('#d-meta').innerHTML =
-    `<span class="color-dot" style="background:${result.color}"></span>` +
-    `${TYPE_LABEL[result.type]}` +
-    (result.notes.length ? ` · ${result.notes.join(' · ')}` : ' · automatisch erkannt');
+    `<span class="color-dot" style="background:${color}"></span>` +
+    bits.join(' · ') + (statusText ? ` · ${statusText}` : '');
+}
+
+// Zweistufig: sofortige lokale Erkennung, dann (falls Schlüssel vorhanden)
+// die KI, die die Produktseite liest bzw. das Bild visuell erkennt.
+async function runDetection() {
+  const link = $('#c-link').value.trim();
+  if (!link && !pendingImage) { $('#c-detected').classList.add('hidden'); return; }
+
+  pendingMeta = { colorName: null, size: null, dimensions: null, brand: null };
+  const local = analyzeItem(link, pendingImageColor);
+  $('#c-name').value = local.name;
+  $('#c-type').value = local.type;
+  $('#c-color').value = local.color;
+  renderDetected({ name: local.name, type: local.type, color: local.color, statusText: state.apiKey ? 'KI analysiert …' : 'automatisch erkannt' });
+
+  if (!state.apiKey) return;
+  const seq = ++detectSeq;
+  try {
+    const ai = await aiAnalyzeItem({ apiKey: state.apiKey, link: link || null, image: pendingImage });
+    if (seq !== detectSeq) return; // Eingabe hat sich inzwischen geändert
+    const name = ai.name || local.name;
+    const type = ai.category || local.type;
+    const color = ai.colorHex || local.color;
+    pendingMeta = { colorName: ai.colorName, size: ai.size, dimensions: ai.dimensions, brand: ai.brand };
+    $('#c-name').value = name;
+    $('#c-type').value = type;
+    $('#c-color').value = color;
+    renderDetected({ name, type, color, statusText: 'von der KI erkannt' });
+  } catch (e) {
+    if (seq !== detectSeq) return;
+    console.warn('KI-Analyse nicht möglich', e);
+    renderDetected({ name: local.name, type: local.type, color: local.color, statusText: 'lokal erkannt (KI nicht erreichbar)' });
+  }
 }
 
 $('#btn-add-item').addEventListener('click', () => {
@@ -243,10 +280,15 @@ $('#btn-add-item').addEventListener('click', () => {
     type: $('#c-type').value,
     link: link || null,
     color: $('#c-color').value,
+    colorName: pendingMeta.colorName,
+    size: pendingMeta.size,
+    dimensions: pendingMeta.dimensions,
+    brand: pendingMeta.brand,
     image: pendingImage,
   };
   state.items.unshift(item);
   store.save('items', state.items);
+  detectSeq++; // laufende KI-Analyse verwerfen
   $('#c-name').value = '';
   $('#c-link').value = '';
   $('#c-image').value = '';
@@ -256,6 +298,7 @@ $('#btn-add-item').addEventListener('click', () => {
   $('#image-drop-text').textContent = 'Produktbild auswählen';
   pendingImage = null;
   pendingImageColor = null;
+  pendingMeta = { colorName: null, size: null, dimensions: null, brand: null };
   renderItems();
   renderWearList();
   toast('„' + item.name + '“ hinzugefügt');
@@ -278,7 +321,11 @@ function itemRow(item, { wearable = false } = {}) {
   info.appendChild(nm);
   const meta = document.createElement('div');
   meta.className = 'meta';
-  meta.innerHTML = `<span class="color-dot" style="background:${item.color}"></span> ${TYPE_LABEL[item.type] || item.type}`;
+  const metaBits = [TYPE_LABEL[item.type] || item.type];
+  if (item.colorName) metaBits.push(item.colorName);
+  if (item.size) metaBits.push('Gr. ' + item.size);
+  if (item.brand) metaBits.push(item.brand);
+  meta.innerHTML = `<span class="color-dot" style="background:${item.color}"></span> ${metaBits.join(' · ')}`;
   if (item.link) {
     const a = document.createElement('a');
     a.href = item.link;
@@ -445,7 +492,7 @@ $('#btn-generate').addEventListener('click', async () => {
   const garments = wornItems().map((i) => ({
     slot: slotOf(i.type),
     image: i.image,
-    desc: `${i.name} (${TYPE_LABEL[i.type]}, Farbe ${i.color})`,
+    desc: `${i.name} (${TYPE_LABEL[i.type]}, Farbe ${i.colorName || i.color}${i.size ? ', Größe ' + i.size : ''}${i.brand ? ', ' + i.brand : ''})`,
   }));
   const hasStrip = Object.values(slotActions).some((a) => a === 'strip');
   if (!garments.length && !hasStrip) {

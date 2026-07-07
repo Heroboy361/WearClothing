@@ -29,6 +29,8 @@ const PATHS = {
   shoe: '<path d="M3.5 17.5h17v-1.7c0-1.8-1.5-2.8-4-3.3l-3-.7-2.5-3.3h-3l-2 2.5-2.5 1v5.5z"/><path d="M3.5 15h17"/>',
   watch: '<circle cx="12" cy="12" r="4.5"/><path d="M12 9.8V12l1.6 1.2M9.5 7.7L10 3.5h4l.5 4.2M9.5 16.3l.5 4.2h4l.5-4.2"/>',
   necklace: '<path d="M4.5 4.5c0 5.5 3.3 8.5 7.5 8.5s7.5-3 7.5-8.5"/><circle cx="12" cy="16" r="2.2"/>',
+  sock: '<path d="M9 3h7v8l2.7 2.7a4.2 4.2 0 1 1-6 6L9 16V3z"/><path d="M9 7h7"/>',
+  underwear: '<path d="M4 6.5h16V10c-3.2 0-5.4 2.2-5.8 5h-4.4C9.4 12.2 7.2 10 4 10V6.5z"/><path d="M4 9h16"/>',
   question: '<path d="M9.2 9a3 3 0 0 1 5.8 1c0 1.8-2.2 2.2-2.8 3.5-.1.3-.2.6-.2 1"/><circle cx="12" cy="18" r="0.4" fill="currentColor"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="8" r="0.4" fill="currentColor"/>',
   arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
@@ -42,5 +44,6 @@ export function icon(name, size = 20, cls = '') {
 
 export const TYPE_ICON = {
   tshirt: 'shirt', longsleeve: 'shirt', jacke: 'jacket', hose: 'pants', shorts: 'shorts',
-  rock: 'skirt', kleid: 'dress', schuhe: 'shoe', uhr: 'watch', kette: 'necklace',
+  rock: 'skirt', kleid: 'dress', schuhe: 'shoe', socken: 'sock', unterwaesche: 'underwear',
+  uhr: 'watch', kette: 'necklace',
 };
