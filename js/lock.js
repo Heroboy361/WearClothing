@@ -16,7 +16,7 @@
   overlay.id = 'lock-overlay';
   overlay.innerHTML = `
     <div class="lock-card">
-      <div class="lock-icon">🔒</div>
+      <div class="lock-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg></div>
       <h1>WearClothing</h1>
       <p>Diese App ist privat. Bitte Passwort eingeben:</p>
       <input type="password" id="lock-pw" autocomplete="current-password" placeholder="Passwort" inputmode="text">

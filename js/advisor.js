@@ -183,7 +183,7 @@ export function analyzeOutfit(items, profile, rules) {
 
   // 1–3 Sätze bauen
   const sentences = [];
-  if (score >= 82) sentences.push('Das sieht richtig gut aus! ✨');
+  if (score >= 82) sentences.push('Das sieht richtig gut aus!');
   else if (score >= 65) sentences.push('Solider Look mit Potenzial.');
   else sentences.push('Hm, da geht noch was.');
 
