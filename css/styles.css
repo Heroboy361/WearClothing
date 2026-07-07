@@ -346,3 +346,60 @@ input[type="color"] {
 @media (min-width: 640px) {
   .field-grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ---------- Sperrbildschirm ---------- */
+html.locked .app-header, html.locked main, html.locked .tabbar { visibility: hidden; }
+#lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(900px 600px at 50% -10%, #232647 0%, var(--bg) 60%), var(--bg);
+}
+.lock-card {
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 28px 22px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.lock-icon { font-size: 40px; }
+.lock-card h1 {
+  font-size: 22px;
+  margin: 10px 0 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.lock-card p { color: var(--text-dim); font-size: 14px; }
+.lock-card input {
+  width: 100%;
+  background: var(--bg-soft);
+  color: var(--text);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 16px;
+  text-align: center;
+  margin: 10px 0;
+}
+.lock-card button {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  padding: 12px;
+  font-weight: 600;
+  font-size: 15px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), #6a5cd8);
+  cursor: pointer;
+}
+.lock-err { color: var(--danger); min-height: 18px; font-size: 13px; }
