@@ -4,13 +4,17 @@
 // und wird nur lokal gespeichert. Fotos werden ausschließlich beim Generieren übertragen.
 
 const MODEL = 'gemini-2.5-flash-image';
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+const TEXT_MODEL = 'gemini-2.5-flash';
+const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const ENDPOINT = `${API_BASE}/${MODEL}:generateContent`;
 
 const SLOT_LABEL_EN = {
   oberteil: 'top (shirt/t-shirt/sweater/dress)',
   jacke: 'jacket/coat',
   hose: 'bottoms (pants/shorts/skirt)',
   schuhe: 'shoes',
+  socken: 'socks',
+  unterwaesche: 'underwear',
   uhr: 'watch',
   kette: 'necklace',
 };
@@ -108,4 +112,56 @@ export async function generateTryOn({ apiKey, prompt, personImage, faceImage, ga
   }
   const inline = imgPart.inlineData || imgPart.inline_data;
   return `data:${inline.mimeType || inline.mime_type || 'image/png'};base64,${inline.data}`;
+}
+
+/* ---------- KI-Produktanalyse (Kleiderschrank) ---------- */
+
+const CATEGORIES = ['tshirt', 'longsleeve', 'jacke', 'hose', 'shorts', 'rock', 'kleid', 'schuhe', 'socken', 'unterwaesche', 'uhr', 'kette'];
+
+/**
+ * Analysiert ein Produkt per KI: liest bei einer Shop-URL die Produktseite
+ * (Name, Farbe wie "Ocean Blue", Größe, Abmaße, Marke) und/oder erkennt die
+ * Kategorie und Farbe visuell aus dem Produktbild.
+ * @returns {Promise<{name, category, colorName, colorHex, size, dimensions, brand}>}
+ */
+export async function aiAnalyzeItem({ apiKey, link, image }) {
+  const instruction = [
+    'You are a product analyzer for a virtual try-on wardrobe app.',
+    link ? `Read the product page at this URL and extract its data: ${link}` : '',
+    image ? 'Also analyze the attached product photo (garment category and color).' : '',
+    'Respond with ONLY minified JSON, no markdown, exactly this shape:',
+    `{"name":"short product name, German if the shop is German, else original","category":"one of ${CATEGORIES.join('|')}","color_name":"the shop's marketing color name if stated (e.g. Ocean Blue), else a German color word","color_hex":"#rrggbb approximation of the main color","size":"the selected/stated size or null","dimensions":"stated measurements/Abmaße or null","brand":"brand name or null"}`,
+    'If the URL cannot be read, derive as much as possible from the URL text itself' + (image ? ' and the photo' : '') + '.',
+  ].filter(Boolean).join('\n');
+
+  const parts = [{ text: instruction }];
+  if (image) parts.push(dataUrlToInline(image));
+
+  const body = { contents: [{ parts }] };
+  if (link) body.tools = [{ url_context: {} }];
+
+  const res = await fetch(`${API_BASE}/${TEXT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error('Analyse fehlgeschlagen (HTTP ' + res.status + ')');
+
+  const data = await res.json();
+  const text = (data?.candidates?.[0]?.content?.parts || [])
+    .map((p) => p.text || '')
+    .join('');
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Keine auswertbare Antwort');
+  const raw = JSON.parse(jsonMatch[0]);
+
+  return {
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 60) : null,
+    category: CATEGORIES.includes(raw.category) ? raw.category : null,
+    colorName: typeof raw.color_name === 'string' && raw.color_name.trim() ? raw.color_name.trim().slice(0, 32) : null,
+    colorHex: /^#[0-9a-f]{6}$/i.test(raw.color_hex || '') ? raw.color_hex : null,
+    size: typeof raw.size === 'string' && raw.size.trim() ? raw.size.trim().slice(0, 24) : null,
+    dimensions: typeof raw.dimensions === 'string' && raw.dimensions.trim() ? raw.dimensions.trim().slice(0, 80) : null,
+    brand: typeof raw.brand === 'string' && raw.brand.trim() ? raw.brand.trim().slice(0, 32) : null,
+  };
 }

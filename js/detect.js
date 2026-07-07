@@ -4,6 +4,8 @@
 const TYPE_KEYWORDS = [
   ['uhr',        ['armbanduhr', 'watch', 'chronograph', ' uhr', '-uhr', 'uhr-']],
   ['kette',      ['halskette', 'kette', 'necklace', 'collier', 'chain', 'anhaenger', 'anhänger']],
+  ['socken',     ['socke', 'socks', 'sock', 'strumpf', 'struempfe', 'strümpfe', 'kniestrumpf']],
+  ['unterwaesche', ['unterhose', 'boxershort', 'boxer-brief', 'boxerbrief', 'retroshort', 'slip', 'panty', 'panties', 'tanga', 'string', 'unterwaesche', 'unterwäsche', 'underwear', 'bralette', 'buegel-bh', 'bh-', '-bh', 'bra-', 'dessous']],
   ['schuhe',     ['sneaker', 'schuh', 'shoe', 'boot', 'stiefel', 'sandale', 'loafer', 'slipper', 'trainer', 'laufschuh']],
   ['longsleeve', ['sweatshirt', 'sweater', 'hoodie', 'kapuzenpullover', 'pullover', 'pulli', 'langarm', 'longsleeve', 'strickjacke', 'strick', 'cardigan', 'sweat']],
   ['jacke',      ['jacke', 'jacket', 'mantel', 'coat', 'blazer', 'parka', 'weste', 'vest', 'windbreaker', 'daunen']],
@@ -39,10 +41,11 @@ const COLOR_KEYWORDS = [
 
 const TYPE_LABEL = {
   tshirt: 'T-Shirt', longsleeve: 'Pullover', jacke: 'Jacke', hose: 'Hose', shorts: 'Shorts',
-  rock: 'Rock', kleid: 'Kleid', schuhe: 'Schuhe', uhr: 'Uhr', kette: 'Kette',
+  rock: 'Rock', kleid: 'Kleid', schuhe: 'Schuhe', socken: 'Socken', unterwaesche: 'Unterwäsche',
+  uhr: 'Uhr', kette: 'Kette',
 };
 // Artikel-korrekte Namensform ("Weiße Hose" statt "Weißes Hose")
-const TYPE_GENDER = { hose: 'e', shorts: '', rock: 'er', kleid: 'es', schuhe: 'e', uhr: 'e', kette: 'e', tshirt: 'es', longsleeve: 'er', jacke: 'e' };
+const TYPE_GENDER = { hose: 'e', shorts: '', rock: 'er', kleid: 'es', schuhe: 'e', socken: 'e', unterwaesche: 'e', uhr: 'e', kette: 'e', tshirt: 'es', longsleeve: 'er', jacke: 'e' };
 
 function normalize(text) {
   return decodeURIComponent(text || '')
