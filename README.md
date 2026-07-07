@@ -1,5 +1,7 @@
 # 👗 WearClothing – Virtuelle Anprobe
 
+**📲 Live-App:** https://heroboy361.github.io/WearClothing/ (passwortgeschützt)
+
 Eine mobile Web-App (PWA) für iPhone, iPad und Desktop: Körpermaße erfassen, Kleidung aus Online-Shops virtuell am eigenen 3D-Avatar anprobieren, Outfits speichern und Stilberatung erhalten. **Alle Daten bleiben lokal auf deinem Gerät** – es gibt keinen Server und kein Konto.
 
 ## ✨ Funktionen
