@@ -1,5 +1,5 @@
 // Service Worker: macht die App offline nutzbar (PWA).
-const CACHE = 'wearclothing-v4';
+const CACHE = 'wearclothing-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -8,11 +8,8 @@ const ASSETS = [
   './js/app.js',
   './js/icons.js',
   './js/detect.js',
-  './js/avatar.js',
+  './js/tryon.js',
   './js/advisor.js',
-  './js/scan.js',
-  './js/vendor/three.module.js',
-  './js/vendor/OrbitControls.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-180.png',
@@ -38,12 +35,13 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
+  if (e.request.method !== 'GET') return; // KI-Aufrufe (POST) gehen direkt ins Netz
+  if (!e.request.url.startsWith(self.location.origin)) return;
   e.respondWith(
     caches.match(e.request).then((cached) => {
       const fetched = fetch(e.request)
         .then((res) => {
-          if (res.ok && e.request.url.startsWith(self.location.origin)) {
+          if (res.ok) {
             const clone = res.clone();
             caches.open(CACHE).then((cache) => cache.put(e.request, clone));
           }

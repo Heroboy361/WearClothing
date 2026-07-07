@@ -1,9 +1,8 @@
-// Haupt-App: Navigation, Zustand, Kleiderschrank, Outfits, Verkabelung aller Module.
-import { initStage, updateAvatar, toggleAutoRotate } from './avatar.js';
+// Haupt-App: Navigation, Zustand, Kleiderschrank, KI-Anprobe, Outfits.
 import { analyzeOutfit } from './advisor.js';
-import { startCamera, stopCamera, capturePhoto, estimateMeasurements, sampleSkinTone } from './scan.js';
 import { icon, TYPE_ICON } from './icons.js';
 import { analyzeItem, TYPE_LABEL } from './detect.js';
+import { buildPrompt, generateTryOn } from './tryon.js';
 
 /* ---------- Zustand & Speicher (bleibt lokal auf dem Gerät) ---------- */
 
@@ -14,20 +13,32 @@ const store = {
   },
   save(key, value) {
     try { localStorage.setItem('wearclothing.' + key, JSON.stringify(value)); }
-    catch (e) { console.warn('Speichern fehlgeschlagen (Speicher voll?)', e); toast('Speicher voll – Bild evtl. zu groß'); }
+    catch (e) { console.warn('Speichern fehlgeschlagen (Speicher voll?)', e); toast('Speicher voll – ältere Outfits löschen hilft'); }
   },
 };
 
 const state = {
-  profile: store.load('profile', {
-    height: 175, build: 'normal', shoulder: 44, chest: 96, waist: 82, hip: 96,
-    inseam: 80, arm: 60, skin: '#e0b394', hair: '#3b2a1e', eyes: '#4a6b8a', hairstyle: 'kurz',
-  }),
+  profile: store.load('profile', { hair: '#3b2a1e', eyes: '#4a6b8a' }),
+  photos: store.load('photos', { body: null, face: null }),
+  apiKey: store.load('apikey', ''),
   items: store.load('items', []),
   worn: store.load('worn', []),
   outfits: store.load('outfits', []),
   rules: store.load('rules', { max3: true, mono: false, neutral: false, accent: true, metal: true, favColors: ['#1f2937', '#e5e0d8', '#7a2e2e'] }),
+  current: store.load('current', null), // letztes KI-Ergebnis
 };
+
+// Slots für die Anprobe-Toggles
+const SLOTS = {
+  oberteil: { label: 'Oberteil', types: ['tshirt', 'longsleeve', 'kleid'] },
+  jacke: { label: 'Jacke', types: ['jacke'] },
+  hose: { label: 'Hose / Rock', types: ['hose', 'shorts', 'rock'] },
+  schuhe: { label: 'Schuhe', types: ['schuhe'] },
+  uhr: { label: 'Uhr', types: ['uhr'] },
+  kette: { label: 'Kette', types: ['kette'] },
+};
+const slotOf = (type) => Object.keys(SLOTS).find((s) => SLOTS[s].types.includes(type));
+const slotActions = { oberteil: 'keep', jacke: 'keep', hose: 'keep', schuhe: 'keep', uhr: 'keep', kette: 'keep' };
 
 const $ = (sel) => document.querySelector(sel);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -37,7 +48,7 @@ function toast(msg) {
   t.className = 'toast';
   t.textContent = msg;
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2200);
+  setTimeout(() => t.remove(), 2600);
 }
 
 /* ---------- Statische Icons einsetzen ---------- */
@@ -45,103 +56,135 @@ function toast(msg) {
 document.querySelectorAll('[data-icon]').forEach((el) => {
   const inTab = el.closest('.tab');
   const inFab = el.closest('.fab');
-  const size = inTab ? 22 : inFab ? 20 : 18;
+  const inEmpty = el.closest('.stage-empty');
+  const size = inTab ? 22 : inFab ? 20 : inEmpty ? 34 : 18;
   el.innerHTML = icon(el.dataset.icon, size);
 });
 
 /* ---------- Navigation ---------- */
 
+function switchView(name) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === name));
+  document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+  $('#view-' + name).classList.add('active');
+}
 document.querySelectorAll('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-    document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
-    $('#view-' + tab.dataset.view).classList.add('active');
-    if (tab.dataset.view === 'anprobe') refreshAvatar();
-  });
+  tab.addEventListener('click', () => switchView(tab.dataset.view));
 });
 
-/* ---------- Profil ---------- */
+/* ---------- Bild-Helfer ---------- */
 
-const profileFields = {
-  height: '#m-height', build: '#m-build', shoulder: '#m-shoulder', chest: '#m-chest',
-  waist: '#m-waist', hip: '#m-hip', inseam: '#m-inseam', arm: '#m-arm',
-  skin: '#a-skin', hair: '#a-hair', eyes: '#a-eyes', hairstyle: '#a-hairstyle',
-};
+function downscaleFile(file, maxSize, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(img.src);
+      resolve(downscaleImg(img, maxSize, quality));
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+function downscaleDataUrl(dataUrl, maxSize, quality = 0.85) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(downscaleImg(img, maxSize, quality));
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+function downscaleImg(img, maxSize, quality) {
+  const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.width * scale);
+  c.height = Math.round(img.height * scale);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', quality);
+}
 
-function profileToForm() {
-  for (const [key, sel] of Object.entries(profileFields)) $(sel).value = state.profile[key];
+// Dominante Farbe eines Bildes (gesättigte Pixel zählen stärker, helle Ränder ignoriert)
+function dominantColor(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      const s = 48;
+      c.width = s; c.height = s;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, s, s);
+      const d = ctx.getImageData(0, 0, s, s).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const [pr, pg, pb, pa] = [d[i], d[i + 1], d[i + 2], d[i + 3]];
+        if (pa < 120) continue;
+        const max = Math.max(pr, pg, pb), min = Math.min(pr, pg, pb);
+        if (min > 235) continue;
+        const weight = 1 + (max - min) / 64;
+        r += pr * weight; g += pg * weight; b += pb * weight; n += weight;
+      }
+      if (!n) return resolve(null);
+      resolve('#' + [r / n, g / n, b / n].map((v) => Math.round(v).toString(16).padStart(2, '0')).join(''));
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
 }
-function formToProfile() {
-  for (const [key, sel] of Object.entries(profileFields)) {
-    const el = $(sel);
-    state.profile[key] = el.type === 'number' ? Number(el.value) : el.value;
-  }
+
+/* ---------- Profil: Fotos, KI-Schlüssel, Aussehen ---------- */
+
+function renderPhotoPreviews() {
+  const b = $('#prev-body'), f = $('#prev-face');
+  b.classList.toggle('hidden', !state.photos.body);
+  if (state.photos.body) b.src = state.photos.body;
+  f.classList.toggle('hidden', !state.photos.face);
+  if (state.photos.face) f.src = state.photos.face;
+  $('#body-drop-text').textContent = state.photos.body ? 'Ganzkörperfoto ersetzen' : 'Ganzkörperfoto auswählen (nötig)';
+  $('#face-drop-text').textContent = state.photos.face ? 'Gesichtsfoto ersetzen' : 'Gesichtsfoto auswählen (optional, für mehr Ähnlichkeit)';
+  $('#body-drop').classList.toggle('has-image', !!state.photos.body);
+  $('#face-drop').classList.toggle('has-image', !!state.photos.face);
 }
+
+$('#p-body').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  state.photos.body = await downscaleFile(file, 1280);
+  state.current = null; // neues Basisfoto -> altes Ergebnis verwerfen
+  store.save('photos', state.photos);
+  store.save('current', null);
+  renderPhotoPreviews();
+  renderStage();
+  toast('Ganzkörperfoto gespeichert');
+});
+
+$('#p-face').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  state.photos.face = await downscaleFile(file, 640);
+  store.save('photos', state.photos);
+  renderPhotoPreviews();
+  toast('Gesichtsfoto gespeichert');
+});
+
+function renderKeyStatus() {
+  $('#ai-key-status').textContent = state.apiKey
+    ? 'Schlüssel gespeichert – bleibt nur auf diesem Gerät.'
+    : 'Noch kein Schlüssel hinterlegt.';
+}
+$('#ai-key').addEventListener('change', () => {
+  state.apiKey = $('#ai-key').value.trim();
+  store.save('apikey', state.apiKey);
+  renderKeyStatus();
+  if (state.apiKey) toast('KI-Schlüssel gespeichert');
+});
 
 $('#btn-save-profile').addEventListener('click', () => {
-  formToProfile();
+  state.profile.hair = $('#a-hair').value;
+  state.profile.eyes = $('#a-eyes').value;
+  state.apiKey = $('#ai-key').value.trim() || state.apiKey;
   store.save('profile', state.profile);
+  store.save('apikey', state.apiKey);
+  renderKeyStatus();
   toast('Profil gespeichert');
-  refreshAvatar();
-});
-
-function fillEstimates() {
-  const est = estimateMeasurements(Number($('#m-height').value) || 175, $('#m-build').value);
-  $('#m-shoulder').value = est.shoulder;
-  $('#m-chest').value = est.chest;
-  $('#m-waist').value = est.waist;
-  $('#m-hip').value = est.hip;
-  $('#m-inseam').value = est.inseam;
-  $('#m-arm').value = est.arm;
-}
-
-$('#btn-estimate').addEventListener('click', () => {
-  fillEstimates();
-  toast('Maße geschätzt – gern feinjustieren');
-});
-
-/* ---------- Kamera-Scan ---------- */
-
-const video = $('#scan-video');
-const scanCanvas = $('#scan-canvas');
-
-$('#btn-start-scan').addEventListener('click', async () => {
-  try {
-    $('#scan-area').classList.remove('hidden');
-    await startCamera(video);
-    $('#btn-start-scan').classList.add('hidden');
-    $('#btn-capture').classList.remove('hidden');
-    $('#btn-stop-scan').classList.remove('hidden');
-    $('#scan-result').textContent = '';
-  } catch (e) {
-    $('#scan-area').classList.add('hidden');
-    $('#scan-result').textContent = 'Kamera nicht verfügbar: ' + e.message + ' – Tipp: Die Seite muss über HTTPS (oder localhost) laufen und Kamerazugriff braucht deine Erlaubnis.';
-  }
-});
-
-$('#btn-stop-scan').addEventListener('click', endScan);
-
-function endScan() {
-  stopCamera(video);
-  $('#scan-area').classList.add('hidden');
-  $('#btn-start-scan').classList.remove('hidden');
-  $('#btn-capture').classList.add('hidden');
-  $('#btn-stop-scan').classList.add('hidden');
-}
-
-$('#btn-capture').addEventListener('click', () => {
-  const photo = capturePhoto(video, scanCanvas);
-  const skin = sampleSkinTone(scanCanvas);
-  endScan();
-  if (!photo) {
-    $('#scan-result').textContent = 'Aufnahme fehlgeschlagen, bitte erneut versuchen.';
-    return;
-  }
-  fillEstimates();
-  if (skin) $('#a-skin').value = skin;
-  $('#scan-result').textContent = 'Scan ausgewertet: Maße wurden aus Größe, Körperbau und Foto geschätzt' +
-    (skin ? ', Hautton übernommen' : '') +
-    '. Prüfe die Werte unten und speichere dein Profil.';
 });
 
 /* ---------- Kleiderschrank: automatische Erkennung ---------- */
@@ -152,7 +195,7 @@ let pendingImageColor = null;
 $('#c-image').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  pendingImage = await downscaleImage(file, 320);
+  pendingImage = await downscaleFile(file, 512, 0.82);
   pendingImageColor = await dominantColor(pendingImage);
   $('#image-drop').classList.add('has-image');
   $('#image-drop-text').textContent = 'Bild ausgewählt – anderes wählen?';
@@ -161,7 +204,6 @@ $('#c-image').addEventListener('change', async (e) => {
 
 $('#c-link').addEventListener('input', () => runDetection());
 
-// Erkennung ausführen und Formular + Vorschau füllen
 function runDetection() {
   const link = $('#c-link').value.trim();
   if (!link && !pendingImage) { $('#c-detected').classList.add('hidden'); return; }
@@ -189,52 +231,6 @@ function runDetection() {
     (result.notes.length ? ` · ${result.notes.join(' · ')}` : ' · automatisch erkannt');
 }
 
-function downscaleImage(file, maxSize) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width * scale);
-      c.height = Math.round(img.height * scale);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(img.src);
-      resolve(c.toDataURL('image/jpeg', 0.82));
-    };
-    img.onerror = reject;
-    img.src = URL.createObjectURL(file);
-  });
-}
-
-// Dominante Farbe: gesättigte Pixel zählen stärker, sehr helle Ränder (Hintergrund) werden ignoriert
-function dominantColor(dataUrl) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      const s = 48;
-      c.width = s; c.height = s;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0, s, s);
-      const d = ctx.getImageData(0, 0, s, s).data;
-      let r = 0, g = 0, b = 0, n = 0;
-      for (let i = 0; i < d.length; i += 4) {
-        const [pr, pg, pb, pa] = [d[i], d[i + 1], d[i + 2], d[i + 3]];
-        if (pa < 120) continue;
-        const max = Math.max(pr, pg, pb), min = Math.min(pr, pg, pb);
-        if (min > 235) continue;
-        const weight = 1 + (max - min) / 64;
-        r += pr * weight; g += pg * weight; b += pb * weight; n += weight;
-      }
-      if (!n) return resolve(null);
-      const hex = '#' + [r / n, g / n, b / n].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
-      resolve(hex);
-    };
-    img.onerror = () => resolve(null);
-    img.src = dataUrl;
-  });
-}
-
 $('#btn-add-item').addEventListener('click', () => {
   const link = $('#c-link').value.trim();
   if (!link && !pendingImage) {
@@ -251,7 +247,6 @@ $('#btn-add-item').addEventListener('click', () => {
   };
   state.items.unshift(item);
   store.save('items', state.items);
-  // Formular zurücksetzen
   $('#c-name').value = '';
   $('#c-link').value = '';
   $('#c-image').value = '';
@@ -302,7 +297,7 @@ function itemRow(item, { wearable = false } = {}) {
     const btn = document.createElement('button');
     btn.className = 'icon-btn' + (worn ? ' active' : '');
     btn.innerHTML = icon(worn ? 'check' : 'plus', 17);
-    btn.title = worn ? 'Ausziehen' : 'Anziehen';
+    btn.title = worn ? 'Abwählen' : 'Auswählen';
     btn.addEventListener('click', () => toggleWear(item.id));
     actions.appendChild(btn);
   } else {
@@ -317,7 +312,6 @@ function itemRow(item, { wearable = false } = {}) {
       store.save('worn', state.worn);
       renderItems();
       renderWearList();
-      refreshAvatar();
     });
     actions.appendChild(del);
   }
@@ -332,13 +326,14 @@ function renderItems() {
   $('#item-empty').classList.toggle('hidden', state.items.length > 0);
 }
 
-/* ---------- Anprobe ---------- */
+/* ---------- Anprobe: Auswahl, Slots, Generierung ---------- */
 
 function renderWearList() {
   const list = $('#wear-list');
   list.innerHTML = '';
   state.items.forEach((item) => list.appendChild(itemRow(item, { wearable: true })));
   $('#wear-empty').classList.toggle('hidden', state.items.length > 0);
+  renderSlots();
 }
 
 function toggleWear(id) {
@@ -347,37 +342,146 @@ function toggleWear(id) {
   if (state.worn.includes(id)) {
     state.worn = state.worn.filter((w) => w !== id);
   } else {
-    // Pro "Slot" nur ein Teil: gleiche/konkurrierende Kategorie ausziehen
-    const slots = {
-      tshirt: ['tshirt', 'longsleeve', 'kleid'], longsleeve: ['tshirt', 'longsleeve', 'kleid'],
-      jacke: ['jacke'], kleid: ['tshirt', 'longsleeve', 'kleid', 'hose', 'shorts', 'rock'],
-      hose: ['hose', 'shorts', 'rock', 'kleid'], shorts: ['hose', 'shorts', 'rock', 'kleid'],
-      rock: ['hose', 'shorts', 'rock', 'kleid'], schuhe: ['schuhe'], uhr: ['uhr'], kette: ['kette'],
-    };
-    const conflict = slots[item.type] || [item.type];
+    // Pro Slot nur ein Teil
+    const slot = slotOf(item.type);
+    const conflictTypes = item.type === 'kleid'
+      ? [...SLOTS.oberteil.types, ...SLOTS.hose.types]
+      : SLOTS[slot]?.types || [item.type];
     state.worn = state.worn.filter((w) => {
       const other = state.items.find((i) => i.id === w);
-      return other && !conflict.includes(other.type);
+      return other && !conflictTypes.includes(other.type);
     });
     state.worn.push(id);
+    if (slot) slotActions[slot] = 'keep'; // "Ausziehen" hebt sich mit Auswahl auf
   }
   store.save('worn', state.worn);
   renderWearList();
-  refreshAvatar();
 }
 
 function wornItems() {
   return state.worn.map((id) => state.items.find((i) => i.id === id)).filter(Boolean);
 }
-
-function refreshAvatar() {
-  updateAvatar(state.profile, wornItems());
+function selectedForSlot(slot) {
+  return wornItems().find((i) => slotOf(i.type) === slot);
 }
 
-$('#btn-autorotate').addEventListener('click', () => {
-  const on = toggleAutoRotate();
-  $('#btn-autorotate').classList.toggle('on', on);
+function renderSlots() {
+  const list = $('#slot-list');
+  list.innerHTML = '';
+  for (const [slot, def] of Object.entries(SLOTS)) {
+    const row = document.createElement('div');
+    row.className = 'slot-row';
+    const label = document.createElement('span');
+    label.className = 'slot-label';
+    label.textContent = def.label;
+    row.appendChild(label);
+
+    const pill = document.createElement('button');
+    const sel = selectedForSlot(slot);
+    if (sel) {
+      pill.className = 'pill swap';
+      pill.textContent = 'Wechseln: ' + sel.name;
+      pill.title = 'Tippen zum Abwählen';
+      pill.addEventListener('click', () => toggleWear(sel.id));
+    } else if (slotActions[slot] === 'strip') {
+      pill.className = 'pill strip';
+      pill.textContent = 'Ausziehen';
+      pill.addEventListener('click', () => { slotActions[slot] = 'keep'; renderSlots(); });
+    } else {
+      pill.className = 'pill';
+      pill.textContent = 'Behalten';
+      pill.addEventListener('click', () => { slotActions[slot] = 'strip'; renderSlots(); });
+    }
+    row.appendChild(pill);
+    list.appendChild(row);
+  }
+}
+
+/* ---------- Foto-Bühne ---------- */
+
+function renderStage() {
+  const img = $('#stage-photo');
+  const src = state.current || state.photos.body;
+  img.classList.toggle('hidden', !src);
+  if (src) img.src = src;
+  $('#stage-empty').classList.toggle('hidden', !!src);
+  $('#result-actions').classList.toggle('hidden', !state.current);
+}
+
+$('#btn-keep-base').addEventListener('click', () => {
+  if (!state.current) return;
+  state.photos.body = state.current;
+  state.current = null;
+  store.save('photos', state.photos);
+  store.save('current', null);
+  renderPhotoPreviews();
+  renderStage();
+  toast('Ergebnis ist jetzt dein Ausgangsfoto');
 });
+
+$('#btn-reset-photo').addEventListener('click', () => {
+  state.current = null;
+  store.save('current', null);
+  renderStage();
+});
+
+/* ---------- KI-Generierung ---------- */
+
+let generating = false;
+
+$('#btn-generate').addEventListener('click', async () => {
+  if (generating) return;
+  if (!state.photos.body) {
+    toast('Lade zuerst im Profil ein Ganzkörperfoto hoch');
+    switchView('profil');
+    return;
+  }
+  if (!state.apiKey) {
+    toast('Bitte zuerst den kostenlosen KI-Schlüssel im Profil eintragen');
+    switchView('profil');
+    return;
+  }
+  const auto = $('#auto-mode').checked;
+  const garments = wornItems().map((i) => ({
+    slot: slotOf(i.type),
+    image: i.image,
+    desc: `${i.name} (${TYPE_LABEL[i.type]}, Farbe ${i.color})`,
+  }));
+  const hasStrip = Object.values(slotActions).some((a) => a === 'strip');
+  if (!garments.length && !hasStrip) {
+    toast('Wähle Kleidung aus oder stelle einen Slot auf „Ausziehen“');
+    return;
+  }
+
+  const slots = Object.fromEntries(Object.entries(slotActions).map(([s, a]) => [s, { action: selectedForSlot(s) ? 'swap' : a }]));
+  const prompt = buildPrompt({ slots, auto, rules: state.rules, hasFace: !!state.photos.face, garments });
+
+  generating = true;
+  $('#stage-loading').classList.remove('hidden');
+  $('#btn-generate').disabled = true;
+  try {
+    const result = await generateTryOn({
+      apiKey: state.apiKey,
+      prompt,
+      personImage: state.photos.body,
+      faceImage: state.photos.face,
+      garments,
+    });
+    state.current = await downscaleDataUrl(result, 1024, 0.86);
+    store.save('current', state.current);
+    renderStage();
+    toast('Fertig – so sieht es an dir aus');
+  } catch (e) {
+    console.warn(e);
+    toast(e.message || 'Generierung fehlgeschlagen');
+  } finally {
+    generating = false;
+    $('#stage-loading').classList.add('hidden');
+    $('#btn-generate').disabled = false;
+  }
+});
+
+/* ---------- Stil-Analyse ---------- */
 
 $('#btn-analyze').addEventListener('click', () => {
   const box = $('#analysis-box');
@@ -388,13 +492,21 @@ $('#btn-analyze').addEventListener('click', () => {
   setTimeout(() => box.classList.add('hidden'), 12000);
 });
 
+$('#btn-advise').addEventListener('click', () => {
+  const { score, text } = analyzeOutfit(wornItems(), state.profile, state.rules);
+  const box = $('#advice-box');
+  box.innerHTML = `<strong>Stil-Check · ${score}/100</strong><br>${text}`;
+  box.classList.remove('hidden');
+});
+
 /* ---------- Outfits ---------- */
 
-$('#btn-save-outfit').addEventListener('click', () => {
+$('#btn-save-outfit').addEventListener('click', async () => {
   const items = wornItems();
-  if (!items.length) { toast('Zieh deinem Avatar zuerst etwas an'); return; }
+  if (!items.length && !state.current) { toast('Wähle Kleidung aus oder probiere zuerst etwas an'); return; }
   const name = $('#outfit-name').value.trim() || 'Outfit vom ' + new Date().toLocaleDateString('de-DE');
-  state.outfits.unshift({ id: uid(), name, itemIds: [...state.worn], fav: false, createdAt: Date.now() });
+  const image = state.current ? await downscaleDataUrl(state.current, 640, 0.8) : null;
+  state.outfits.unshift({ id: uid(), name, itemIds: [...state.worn], image, fav: false, createdAt: Date.now() });
   store.save('outfits', state.outfits);
   $('#outfit-name').value = '';
   renderOutfits();
@@ -411,6 +523,13 @@ function renderOutfits() {
 
     const head = document.createElement('div');
     head.className = 'head';
+    if (outfit.image) {
+      const thumb = document.createElement('img');
+      thumb.className = 'outfit-thumb';
+      thumb.src = outfit.image;
+      thumb.alt = outfit.name;
+      head.appendChild(thumb);
+    }
     const name = document.createElement('div');
     name.className = 'name';
     name.textContent = outfit.name;
@@ -443,13 +562,17 @@ function renderOutfits() {
     actions.className = 'actions';
     const wear = document.createElement('button');
     wear.className = 'btn primary';
-    wear.textContent = 'Anziehen';
+    wear.textContent = 'Ansehen';
     wear.addEventListener('click', () => {
       state.worn = outfit.itemIds.filter((id) => state.items.some((i) => i.id === id));
       store.save('worn', state.worn);
+      if (outfit.image) {
+        state.current = outfit.image;
+        store.save('current', state.current);
+      }
       renderWearList();
-      refreshAvatar();
-      document.querySelector('.tab[data-view="anprobe"]').click();
+      renderStage();
+      switchView('anprobe');
     });
     actions.appendChild(wear);
     const del = document.createElement('button');
@@ -495,22 +618,18 @@ $('#btn-save-rules').addEventListener('click', () => {
   toast('Stilregeln gespeichert');
 });
 
-$('#btn-advise').addEventListener('click', () => {
-  const { score, text } = analyzeOutfit(wornItems(), state.profile, state.rules);
-  const box = $('#advice-box');
-  box.innerHTML = `<strong>Stil-Check · ${score}/100</strong><br>${text}`;
-  box.classList.remove('hidden');
-});
-
 /* ---------- Start ---------- */
 
-profileToForm();
+$('#a-hair').value = state.profile.hair || '#3b2a1e';
+$('#a-eyes').value = state.profile.eyes || '#4a6b8a';
+if (state.apiKey) $('#ai-key').value = state.apiKey;
+renderKeyStatus();
+renderPhotoPreviews();
 rulesToForm();
 renderItems();
 renderWearList();
 renderOutfits();
-initStage($('#stage'));
-refreshAvatar();
+renderStage();
 
 // Service Worker für Offline-Nutzung / "App installieren"
 if ('serviceWorker' in navigator) {
