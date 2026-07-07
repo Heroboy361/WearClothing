@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <title>WearClothing – Virtuelle Anprobe</title>
+  <meta name="description" content="Virtuelle Anprobe: Körpermaße scannen, Kleidung aus Shops anprobieren, Outfits speichern und Stilberatung erhalten.">
+  <meta name="theme-color" content="#0e0f14">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="WearClothing">
+  <link rel="stylesheet" href="css/styles.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./js/vendor/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="logo">👗 <span>WearClothing</span></div>
+    <div class="header-sub">Virtuelle Anprobe</div>
+  </header>
+
+  <main id="main">
+
+    <!-- ================= PROFIL / SCAN ================= -->
+    <section id="view-profil" class="view active">
+      <h2>Mein Körperprofil</h2>
+      <p class="hint">Scanne dich mit der Kamera oder gib deine Maße direkt ein. Alles bleibt lokal auf deinem Gerät gespeichert.</p>
+
+      <div class="card">
+        <h3>📷 Kamera-Scan <span class="badge">Beta</span></h3>
+        <p class="hint">Stell dich ca. 2–3 m vor die Kamera, sodass du komplett in die Silhouette passt. Aus deiner Körpergröße und dem Foto werden die Maße geschätzt – danach kannst du sie feinjustieren.</p>
+        <p class="hint small">Hinweis: Der LiDAR-Sensor des iPhones ist für Web-Apps von Apple nicht freigegeben, daher nutzt der Scan Kamera + Größe + Körperproportionen.</p>
+        <div id="scan-area" class="scan-area hidden">
+          <video id="scan-video" autoplay playsinline muted></video>
+          <svg id="scan-overlay" viewBox="0 0 100 178" preserveAspectRatio="xMidYMid meet">
+            <path id="silhouette-path" d="M50 6 a9 9 0 0 1 9 9 a9 9 0 0 1 -3 7 c6 2 12 5 13 12 l3 34 l5 22 l-7 2 l-6 -22 l-2 -14 l0 30 l6 48 l3 36 l-10 0 l-5 -40 l-3 -28 l-3 28 l-5 40 l-10 0 l3 -36 l6 -48 l0 -30 l-2 14 l-6 22 l-7 -2 l5 -22 l3 -34 c1 -7 7 -10 13 -12 a9 9 0 0 1 -3 -7 a9 9 0 0 1 9 -9 z"/>
+          </svg>
+          <canvas id="scan-canvas" class="hidden"></canvas>
+        </div>
+        <div class="row">
+          <button id="btn-start-scan" class="btn primary">Kamera starten</button>
+          <button id="btn-capture" class="btn primary hidden">📸 Aufnehmen</button>
+          <button id="btn-stop-scan" class="btn ghost hidden">Abbrechen</button>
+        </div>
+        <div id="scan-result" class="hint"></div>
+      </div>
+
+      <div class="card">
+        <h3>📏 Meine Maße</h3>
+        <div class="field-grid">
+          <label>Körpergröße (cm)
+            <input type="number" id="m-height" min="100" max="230" value="175">
+          </label>
+          <label>Körperbau
+            <select id="m-build">
+              <option value="schlank">Schlank</option>
+              <option value="normal" selected>Normal</option>
+              <option value="athletisch">Athletisch</option>
+              <option value="kräftig">Kräftig</option>
+            </select>
+          </label>
+          <label>Schulterbreite (cm)
+            <input type="number" id="m-shoulder" min="30" max="70" value="44">
+          </label>
+          <label>Brustumfang (cm)
+            <input type="number" id="m-chest" min="60" max="160" value="96">
+          </label>
+          <label>Taillenumfang (cm)
+            <input type="number" id="m-waist" min="50" max="150" value="82">
+          </label>
+          <label>Hüftumfang (cm)
+            <input type="number" id="m-hip" min="60" max="160" value="96">
+          </label>
+          <label>Beinlänge innen (cm)
+            <input type="number" id="m-inseam" min="50" max="110" value="80">
+          </label>
+          <label>Armlänge (cm)
+            <input type="number" id="m-arm" min="40" max="90" value="60">
+          </label>
+        </div>
+        <button id="btn-estimate" class="btn ghost">Maße aus Größe + Körperbau schätzen</button>
+      </div>
+
+      <div class="card">
+        <h3>🎨 Aussehen (für Stilberatung &amp; Avatar)</h3>
+        <div class="field-grid">
+          <label>Hautton
+            <input type="color" id="a-skin" value="#e0b394">
+          </label>
+          <label>Haarfarbe
+            <input type="color" id="a-hair" value="#3b2a1e">
+          </label>
+          <label>Augenfarbe
+            <input type="color" id="a-eyes" value="#4a6b8a">
+          </label>
+          <label>Frisur
+            <select id="a-hairstyle">
+              <option value="kurz" selected>Kurz</option>
+              <option value="mittel">Mittel</option>
+              <option value="lang">Lang</option>
+              <option value="glatze">Glatze</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <button id="btn-save-profile" class="btn primary wide">Profil speichern</button>
+      <div id="profile-saved" class="toast hidden">✅ Profil gespeichert</div>
+    </section>
+
+    <!-- ================= KLEIDUNG ================= -->
+    <section id="view-kleidung" class="view">
+      <h2>Kleiderschrank</h2>
+      <p class="hint">Füge Teile aus Online-Shops hinzu – per Link, Bild oder beidem.</p>
+
+      <div class="card">
+        <h3>➕ Neues Teil</h3>
+        <div class="field-grid">
+          <label>Name
+            <input type="text" id="c-name" placeholder="z. B. Weißes Basic T-Shirt">
+          </label>
+          <label>Kategorie
+            <select id="c-type">
+              <option value="tshirt">T-Shirt</option>
+              <option value="longsleeve">Langarmshirt / Pullover</option>
+              <option value="jacke">Jacke / Mantel</option>
+              <option value="hose">Hose</option>
+              <option value="shorts">Shorts</option>
+              <option value="rock">Rock</option>
+              <option value="kleid">Kleid</option>
+              <option value="schuhe">Schuhe</option>
+              <option value="uhr">Uhr ⌚</option>
+              <option value="kette">Kette 📿</option>
+            </select>
+          </label>
+          <label>Shop-Link (optional)
+            <input type="url" id="c-link" placeholder="https://shop.de/produkt…" inputmode="url">
+          </label>
+          <label>Farbe
+            <input type="color" id="c-color" value="#ffffff">
+          </label>
+        </div>
+        <label class="file-label">📎 Produktbild hochladen (optional)
+          <input type="file" id="c-image" accept="image/*">
+        </label>
+        <div id="c-preview" class="img-preview hidden"><img alt="Vorschau"><span class="hint small">Farbe wurde automatisch aus dem Bild übernommen – du kannst sie oben anpassen.</span></div>
+        <button id="btn-add-item" class="btn primary wide">Zum Kleiderschrank hinzufügen</button>
+      </div>
+
+      <div class="card">
+        <h3>👚 Meine Teile</h3>
+        <div id="item-list" class="item-list"></div>
+        <p id="item-empty" class="hint">Noch keine Teile – füge oben dein erstes hinzu.</p>
+      </div>
+    </section>
+
+    <!-- ================= ANPROBE ================= -->
+    <section id="view-anprobe" class="view">
+      <h2>Anprobe</h2>
+      <div class="stage-wrap">
+        <div id="stage"></div>
+        <button id="btn-analyze" class="fab" title="Outfit analysieren">?</button>
+        <button id="btn-autorotate" class="fab fab-left" title="Automatisch drehen">↻</button>
+        <div id="analysis-box" class="analysis hidden"></div>
+      </div>
+      <p class="hint center">Mit dem Finger drehen · Pinch zum Zoomen · 360°-Ansicht</p>
+
+      <div class="card">
+        <h3>Anziehen</h3>
+        <div id="wear-list" class="wear-list"></div>
+        <p id="wear-empty" class="hint">Füge zuerst Teile im Kleiderschrank hinzu.</p>
+      </div>
+
+      <div class="card row">
+        <input type="text" id="outfit-name" placeholder="Outfit-Name, z. B. „Casual Freitag“">
+        <button id="btn-save-outfit" class="btn primary">💾 Outfit speichern</button>
+      </div>
+    </section>
+
+    <!-- ================= OUTFITS ================= -->
+    <section id="view-outfits" class="view">
+      <h2>Meine Outfits</h2>
+      <p class="hint">Gespeicherte Looks – tippe zum Anziehen, ⭐ für Favoriten.</p>
+      <div id="outfit-list" class="outfit-list"></div>
+      <p id="outfit-empty" class="hint">Noch keine Outfits gespeichert. Stell dir in der Anprobe einen Look zusammen und speichere ihn.</p>
+    </section>
+
+    <!-- ================= BERATER ================= -->
+    <section id="view-berater" class="view">
+      <h2>Stilberater</h2>
+      <p class="hint">Wähle deine Stilregeln – der Berater prüft deine Outfits danach.</p>
+
+      <div class="card">
+        <h3>Meine Stilregeln</h3>
+        <label class="check"><input type="checkbox" id="r-max3" checked> Maximal 3 Farben pro Outfit (3-Farben-Regel)</label>
+        <label class="check"><input type="checkbox" id="r-mono"> Monochrom / Ton-in-Ton bevorzugen</label>
+        <label class="check"><input type="checkbox" id="r-neutral"> Neutrale Basisfarben (Schwarz, Weiß, Grau, Beige, Navy)</label>
+        <label class="check"><input type="checkbox" id="r-accent"> Eine Akzentfarbe erlaubt</label>
+        <label class="check"><input type="checkbox" id="r-metal" checked> Schmuck-Metalle aufeinander abstimmen</label>
+        <h3 style="margin-top:16px">Lieblingsfarben</h3>
+        <div class="row">
+          <input type="color" id="fav-c1" value="#1f2937">
+          <input type="color" id="fav-c2" value="#e5e0d8">
+          <input type="color" id="fav-c3" value="#7a2e2e">
+        </div>
+        <button id="btn-save-rules" class="btn primary wide">Regeln speichern</button>
+      </div>
+
+      <div class="card">
+        <h3>💡 Aktuelles Outfit bewerten</h3>
+        <p class="hint">Bewertet, was du gerade in der Anprobe trägst.</p>
+        <button id="btn-advise" class="btn primary wide">Outfit jetzt analysieren</button>
+        <div id="advice-box" class="analysis static hidden"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-view="profil" class="tab active"><span>🧍</span>Profil</button>
+    <button data-view="kleidung" class="tab"><span>👕</span>Kleidung</button>
+    <button data-view="anprobe" class="tab"><span>✨</span>Anprobe</button>
+    <button data-view="outfits" class="tab"><span>⭐</span>Outfits</button>
+    <button data-view="berater" class="tab"><span>💡</span>Berater</button>
+  </nav>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
