@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
   <title>WearClothing – Virtuelle Anprobe</title>
-  <meta name="description" content="Virtuelle Anprobe: Körpermaße scannen, Kleidung aus Shops anprobieren, Outfits speichern und Stilberatung erhalten.">
+  <meta name="description" content="Virtuelle Anprobe: eigenes Foto hochladen, Kleidung aus Shops fotorealistisch anprobieren, Outfits speichern und Stilberatung erhalten.">
   <meta name="theme-color" content="#0b0c10">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -15,13 +15,6 @@
   <meta name="apple-mobile-web-app-title" content="WearClothing">
   <link rel="stylesheet" href="css/styles.css">
   <script src="js/lock.js"></script>
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "./js/vendor/three.module.js"
-    }
-  }
-  </script>
 </head>
 <body>
   <header class="app-header">
@@ -31,85 +24,48 @@
 
   <main id="main">
 
-    <!-- ================= PROFIL / SCAN ================= -->
+    <!-- ================= PROFIL ================= -->
     <section id="view-profil" class="view active">
-      <h2>Mein Körperprofil</h2>
-      <p class="hint">Scanne dich mit der Kamera oder gib deine Maße direkt ein. Alles bleibt lokal auf deinem Gerät.</p>
+      <h2>Mein Profil</h2>
+      <p class="hint">Lade ein Foto von dir hoch – die KI orientiert sich daran und analysiert Körper, Proportionen und Kleidung direkt vom Bild.</p>
 
       <div class="card">
-        <h3><span class="h-icn" data-icon="camera"></span>Kamera-Scan <span class="badge">Beta</span></h3>
-        <p class="hint">Stell dich ca. 2–3 m vor die Kamera, sodass du komplett in die Silhouette passt. Aus deiner Körpergröße und dem Foto werden die Maße geschätzt – danach kannst du sie feinjustieren.</p>
-        <p class="hint small">Hinweis: Der LiDAR-Sensor des iPhones ist für Web-Apps nicht freigegeben, daher nutzt der Scan Kamera, Größe und Körperproportionen.</p>
-        <div id="scan-area" class="scan-area hidden">
-          <video id="scan-video" autoplay playsinline muted></video>
-          <svg id="scan-overlay" viewBox="0 0 100 178" preserveAspectRatio="xMidYMid meet">
-            <path id="silhouette-path" d="M50 6 a9 9 0 0 1 9 9 a9 9 0 0 1 -3 7 c6 2 12 5 13 12 l3 34 l5 22 l-7 2 l-6 -22 l-2 -14 l0 30 l6 48 l3 36 l-10 0 l-5 -40 l-3 -28 l-3 28 l-5 40 l-10 0 l3 -36 l6 -48 l0 -30 l-2 14 l-6 22 l-7 -2 l5 -22 l3 -34 c1 -7 7 -10 13 -12 a9 9 0 0 1 -3 -7 a9 9 0 0 1 9 -9 z"/>
-          </svg>
-          <canvas id="scan-canvas" class="hidden"></canvas>
+        <h3><span class="h-icn" data-icon="person"></span>Meine Fotos</h3>
+        <label class="file-label" id="body-drop">
+          <span class="h-icn" data-icon="photo"></span>
+          <span id="body-drop-text">Ganzkörperfoto auswählen (nötig)</span>
+          <input type="file" id="p-body" accept="image/*">
+        </label>
+        <label class="file-label" id="face-drop">
+          <span class="h-icn" data-icon="camera"></span>
+          <span id="face-drop-text">Gesichtsfoto auswählen (optional, für mehr Ähnlichkeit)</span>
+          <input type="file" id="p-face" accept="image/*">
+        </label>
+        <div class="photo-previews">
+          <img id="prev-body" class="photo-prev hidden" alt="Ganzkörperfoto">
+          <img id="prev-face" class="photo-prev small hidden" alt="Gesichtsfoto">
         </div>
-        <div class="row">
-          <button id="btn-start-scan" class="btn primary">Kamera starten</button>
-          <button id="btn-capture" class="btn primary hidden">Aufnehmen</button>
-          <button id="btn-stop-scan" class="btn ghost hidden">Abbrechen</button>
-        </div>
-        <div id="scan-result" class="hint"></div>
+        <p class="hint small">Tipp: gut beleuchtet, ganzer Körper sichtbar, gern mit aktueller Kleidung. Die Fotos bleiben auf deinem Gerät und werden nur beim Generieren an die Bild-KI übertragen.</p>
       </div>
 
       <div class="card">
-        <h3><span class="h-icn" data-icon="ruler"></span>Meine Maße</h3>
-        <div class="field-grid">
-          <label>Körpergröße (cm)
-            <input type="number" id="m-height" min="100" max="230" value="175">
-          </label>
-          <label>Körperbau
-            <select id="m-build">
-              <option value="schlank">Schlank</option>
-              <option value="normal" selected>Normal</option>
-              <option value="athletisch">Athletisch</option>
-              <option value="kräftig">Kräftig</option>
-            </select>
-          </label>
-          <label>Schulterbreite (cm)
-            <input type="number" id="m-shoulder" min="30" max="70" value="44">
-          </label>
-          <label>Brustumfang (cm)
-            <input type="number" id="m-chest" min="60" max="160" value="96">
-          </label>
-          <label>Taillenumfang (cm)
-            <input type="number" id="m-waist" min="50" max="150" value="82">
-          </label>
-          <label>Hüftumfang (cm)
-            <input type="number" id="m-hip" min="60" max="160" value="96">
-          </label>
-          <label>Beinlänge innen (cm)
-            <input type="number" id="m-inseam" min="50" max="110" value="80">
-          </label>
-          <label>Armlänge (cm)
-            <input type="number" id="m-arm" min="40" max="90" value="60">
-          </label>
+        <h3><span class="h-icn" data-icon="wand"></span>Bild-KI einrichten</h3>
+        <p class="hint">Für die fotorealistische Anprobe brauchst du einmalig einen kostenlosen Google-KI-Schlüssel: <a class="ext" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> öffnen, „API-Schlüssel erstellen“, hier einfügen.</p>
+        <div class="link-row">
+          <span class="h-icn dim" data-icon="lock"></span>
+          <input type="password" id="ai-key" placeholder="API-Schlüssel einfügen" autocomplete="off">
         </div>
-        <button id="btn-estimate" class="btn ghost">Maße aus Größe + Körperbau schätzen</button>
+        <p id="ai-key-status" class="hint small"></p>
       </div>
 
       <div class="card">
-        <h3><span class="h-icn" data-icon="droplet"></span>Aussehen (für Stilberatung &amp; Avatar)</h3>
+        <h3><span class="h-icn" data-icon="droplet"></span>Aussehen (für die Stilberatung)</h3>
         <div class="field-grid">
-          <label>Hautton
-            <input type="color" id="a-skin" value="#e0b394">
-          </label>
           <label>Haarfarbe
             <input type="color" id="a-hair" value="#3b2a1e">
           </label>
           <label>Augenfarbe
             <input type="color" id="a-eyes" value="#4a6b8a">
-          </label>
-          <label>Frisur
-            <select id="a-hairstyle">
-              <option value="kurz" selected>Kurz</option>
-              <option value="mittel">Mittel</option>
-              <option value="lang">Lang</option>
-              <option value="glatze">Glatze</option>
-            </select>
           </label>
         </div>
       </div>
@@ -181,23 +137,45 @@
     <!-- ================= ANPROBE ================= -->
     <section id="view-anprobe" class="view">
       <h2>Anprobe</h2>
-      <div class="stage-wrap">
-        <div id="stage"></div>
+
+      <div class="photo-stage" id="photo-stage">
+        <img id="stage-photo" class="hidden" alt="Anprobe">
+        <div id="stage-empty" class="stage-empty">
+          <span class="h-icn" data-icon="photo"></span>
+          <p>Lade zuerst im Profil ein Ganzkörperfoto hoch.</p>
+        </div>
+        <div id="stage-loading" class="stage-loading hidden">
+          <div class="spinner"></div>
+          <p>Die KI berechnet dein Outfit …<br><span class="hint small">Das dauert einen kurzen Moment.</span></p>
+        </div>
         <button id="btn-analyze" class="fab" title="Outfit analysieren"><span class="h-icn" data-icon="question"></span></button>
-        <button id="btn-autorotate" class="fab fab-left" title="Automatisch drehen"><span class="h-icn" data-icon="rotate"></span></button>
         <div id="analysis-box" class="analysis hidden"></div>
       </div>
-      <p class="hint center">Mit dem Finger drehen · Pinch zum Zoomen · 360°-Ansicht</p>
+
+      <div id="result-actions" class="row result-actions hidden">
+        <button id="btn-keep-base" class="btn">Als neues Ausgangsfoto</button>
+        <button id="btn-reset-photo" class="btn ghost">Zurück zum Original</button>
+      </div>
 
       <div class="card">
-        <h3><span class="h-icn" data-icon="person"></span>Anziehen</h3>
+        <h3><span class="h-icn" data-icon="sliders"></span>Was soll passieren?</h3>
+        <div id="slot-list" class="slot-list"></div>
+        <label class="check"><input type="checkbox" id="auto-mode"> Automatisch: KI wählt, was zu meinen Stilregeln passt</label>
+      </div>
+
+      <div class="card">
+        <h3><span class="h-icn" data-icon="hanger"></span>Kleidung auswählen</h3>
         <div id="wear-list" class="wear-list"></div>
         <p id="wear-empty" class="hint">Füge zuerst Teile im Kleiderschrank hinzu.</p>
       </div>
 
+      <button id="btn-generate" class="btn primary wide big">
+        <span class="h-icn" data-icon="sparkle"></span>Anprobieren
+      </button>
+
       <div class="card row">
         <input type="text" id="outfit-name" placeholder="Outfit-Name, z. B. „Casual Freitag“">
-        <button id="btn-save-outfit" class="btn primary">Outfit speichern</button>
+        <button id="btn-save-outfit" class="btn">Outfit speichern</button>
       </div>
     </section>
 
@@ -206,13 +184,13 @@
       <h2>Meine Outfits</h2>
       <p class="hint">Gespeicherte Looks – tippe zum Anziehen, Stern für Favoriten.</p>
       <div id="outfit-list" class="outfit-list"></div>
-      <p id="outfit-empty" class="hint">Noch keine Outfits gespeichert. Stell dir in der Anprobe einen Look zusammen und speichere ihn.</p>
+      <p id="outfit-empty" class="hint">Noch keine Outfits gespeichert. Probiere in der Anprobe einen Look an und speichere ihn.</p>
     </section>
 
     <!-- ================= BERATER ================= -->
     <section id="view-berater" class="view">
       <h2>Stilberater</h2>
-      <p class="hint">Wähle deine Stilregeln – der Berater prüft deine Outfits danach.</p>
+      <p class="hint">Wähle deine Stilregeln – der Berater prüft deine Outfits danach, und der Automatik-Modus der Anprobe richtet sich danach.</p>
 
       <div class="card">
         <h3><span class="h-icn" data-icon="sliders"></span>Meine Stilregeln</h3>
@@ -231,9 +209,9 @@
       </div>
 
       <div class="card">
-        <h3><span class="h-icn" data-icon="bulb"></span>Aktuelles Outfit bewerten</h3>
-        <p class="hint">Bewertet, was du gerade in der Anprobe trägst.</p>
-        <button id="btn-advise" class="btn primary wide">Outfit jetzt analysieren</button>
+        <h3><span class="h-icn" data-icon="bulb"></span>Aktuelle Auswahl bewerten</h3>
+        <p class="hint">Bewertet die Teile, die du gerade in der Anprobe ausgewählt hast.</p>
+        <button id="btn-advise" class="btn primary wide">Auswahl jetzt analysieren</button>
         <div id="advice-box" class="analysis static hidden"></div>
       </div>
     </section>
