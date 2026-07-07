@@ -2,6 +2,8 @@
 import { initStage, updateAvatar, toggleAutoRotate } from './avatar.js';
 import { analyzeOutfit } from './advisor.js';
 import { startCamera, stopCamera, capturePhoto, estimateMeasurements, sampleSkinTone } from './scan.js';
+import { icon, TYPE_ICON } from './icons.js';
+import { analyzeItem, TYPE_LABEL } from './detect.js';
 
 /* ---------- Zustand & Speicher (bleibt lokal auf dem Gerät) ---------- */
 
@@ -12,7 +14,7 @@ const store = {
   },
   save(key, value) {
     try { localStorage.setItem('wearclothing.' + key, JSON.stringify(value)); }
-    catch (e) { console.warn('Speichern fehlgeschlagen (Speicher voll?)', e); toast('⚠️ Speicher voll – Bild evtl. zu groß'); }
+    catch (e) { console.warn('Speichern fehlgeschlagen (Speicher voll?)', e); toast('Speicher voll – Bild evtl. zu groß'); }
   },
 };
 
@@ -37,6 +39,15 @@ function toast(msg) {
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 2200);
 }
+
+/* ---------- Statische Icons einsetzen ---------- */
+
+document.querySelectorAll('[data-icon]').forEach((el) => {
+  const inTab = el.closest('.tab');
+  const inFab = el.closest('.fab');
+  const size = inTab ? 22 : inFab ? 20 : 18;
+  el.innerHTML = icon(el.dataset.icon, size);
+});
 
 /* ---------- Navigation ---------- */
 
@@ -70,11 +81,11 @@ function formToProfile() {
 $('#btn-save-profile').addEventListener('click', () => {
   formToProfile();
   store.save('profile', state.profile);
-  toast('✅ Profil gespeichert');
+  toast('Profil gespeichert');
   refreshAvatar();
 });
 
-$('#btn-estimate').addEventListener('click', () => {
+function fillEstimates() {
   const est = estimateMeasurements(Number($('#m-height').value) || 175, $('#m-build').value);
   $('#m-shoulder').value = est.shoulder;
   $('#m-chest').value = est.chest;
@@ -82,7 +93,11 @@ $('#btn-estimate').addEventListener('click', () => {
   $('#m-hip').value = est.hip;
   $('#m-inseam').value = est.inseam;
   $('#m-arm').value = est.arm;
-  toast('📏 Maße geschätzt – gern feinjustieren');
+}
+
+$('#btn-estimate').addEventListener('click', () => {
+  fillEstimates();
+  toast('Maße geschätzt – gern feinjustieren');
 });
 
 /* ---------- Kamera-Scan ---------- */
@@ -100,7 +115,7 @@ $('#btn-start-scan').addEventListener('click', async () => {
     $('#scan-result').textContent = '';
   } catch (e) {
     $('#scan-area').classList.add('hidden');
-    $('#scan-result').textContent = '❌ Kamera nicht verfügbar: ' + e.message + ' – Tipp: Die Seite muss über HTTPS (oder localhost) laufen und Kamerazugriff braucht deine Erlaubnis.';
+    $('#scan-result').textContent = 'Kamera nicht verfügbar: ' + e.message + ' – Tipp: Die Seite muss über HTTPS (oder localhost) laufen und Kamerazugriff braucht deine Erlaubnis.';
   }
 });
 
@@ -119,45 +134,60 @@ $('#btn-capture').addEventListener('click', () => {
   const skin = sampleSkinTone(scanCanvas);
   endScan();
   if (!photo) {
-    $('#scan-result').textContent = '❌ Aufnahme fehlgeschlagen, bitte erneut versuchen.';
+    $('#scan-result').textContent = 'Aufnahme fehlgeschlagen, bitte erneut versuchen.';
     return;
   }
-  const est = estimateMeasurements(Number($('#m-height').value) || 175, $('#m-build').value);
-  $('#m-shoulder').value = est.shoulder;
-  $('#m-chest').value = est.chest;
-  $('#m-waist').value = est.waist;
-  $('#m-hip').value = est.hip;
-  $('#m-inseam').value = est.inseam;
-  $('#m-arm').value = est.arm;
+  fillEstimates();
   if (skin) $('#a-skin').value = skin;
-  $('#scan-result').innerHTML = '✅ Scan ausgewertet: Maße wurden aus Größe, Körperbau und Foto geschätzt' +
+  $('#scan-result').textContent = 'Scan ausgewertet: Maße wurden aus Größe, Körperbau und Foto geschätzt' +
     (skin ? ', Hautton übernommen' : '') +
     '. Prüfe die Werte unten und speichere dein Profil.';
 });
 
-/* ---------- Kleiderschrank ---------- */
-
-const TYPE_ICONS = {
-  tshirt: '👕', longsleeve: '🧥', jacke: '🧥', hose: '👖', shorts: '🩳',
-  rock: '👗', kleid: '👗', schuhe: '👟', uhr: '⌚', kette: '📿',
-};
-const TYPE_NAMES = {
-  tshirt: 'T-Shirt', longsleeve: 'Langarm/Pulli', jacke: 'Jacke', hose: 'Hose', shorts: 'Shorts',
-  rock: 'Rock', kleid: 'Kleid', schuhe: 'Schuhe', uhr: 'Uhr', kette: 'Kette',
-};
+/* ---------- Kleiderschrank: automatische Erkennung ---------- */
 
 let pendingImage = null;
+let pendingImageColor = null;
 
 $('#c-image').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   pendingImage = await downscaleImage(file, 320);
-  const prev = $('#c-preview');
-  prev.classList.remove('hidden');
-  prev.querySelector('img').src = pendingImage;
-  const dominant = await dominantColor(pendingImage);
-  if (dominant) $('#c-color').value = dominant;
+  pendingImageColor = await dominantColor(pendingImage);
+  $('#image-drop').classList.add('has-image');
+  $('#image-drop-text').textContent = 'Bild ausgewählt – anderes wählen?';
+  runDetection();
 });
+
+$('#c-link').addEventListener('input', () => runDetection());
+
+// Erkennung ausführen und Formular + Vorschau füllen
+function runDetection() {
+  const link = $('#c-link').value.trim();
+  if (!link && !pendingImage) { $('#c-detected').classList.add('hidden'); return; }
+
+  const result = analyzeItem(link, pendingImageColor);
+  $('#c-name').value = result.name;
+  $('#c-type').value = result.type;
+  $('#c-color').value = result.color;
+
+  const box = $('#c-detected');
+  box.classList.remove('hidden');
+  const thumb = $('#d-thumb');
+  if (pendingImage) {
+    thumb.style.backgroundImage = `url(${pendingImage})`;
+    thumb.innerHTML = '';
+  } else {
+    thumb.style.backgroundImage = 'none';
+    thumb.style.background = result.color;
+    thumb.innerHTML = icon(TYPE_ICON[result.type] || 'shirt', 26);
+  }
+  $('#d-name').textContent = result.name;
+  $('#d-meta').innerHTML =
+    `<span class="color-dot" style="background:${result.color}"></span>` +
+    `${TYPE_LABEL[result.type]}` +
+    (result.notes.length ? ` · ${result.notes.join(' · ')}` : ' · automatisch erkannt');
+}
 
 function downscaleImage(file, maxSize) {
   return new Promise((resolve, reject) => {
@@ -176,7 +206,7 @@ function downscaleImage(file, maxSize) {
   });
 }
 
-// Dominante Farbe: häufigster gesättigter Farbton, sonst mittlerer Grauwert
+// Dominante Farbe: gesättigte Pixel zählen stärker, sehr helle Ränder (Hintergrund) werden ignoriert
 function dominantColor(dataUrl) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -192,9 +222,8 @@ function dominantColor(dataUrl) {
         const [pr, pg, pb, pa] = [d[i], d[i + 1], d[i + 2], d[i + 3]];
         if (pa < 120) continue;
         const max = Math.max(pr, pg, pb), min = Math.min(pr, pg, pb);
-        // Weißen/sehr hellen Hintergrund ignorieren
         if (min > 235) continue;
-        const weight = 1 + (max - min) / 64; // gesättigte Pixel zählen stärker
+        const weight = 1 + (max - min) / 64;
         r += pr * weight; g += pg * weight; b += pb * weight; n += weight;
       }
       if (!n) return resolve(null);
@@ -207,14 +236,16 @@ function dominantColor(dataUrl) {
 }
 
 $('#btn-add-item').addEventListener('click', () => {
-  const name = $('#c-name').value.trim();
-  const type = $('#c-type').value;
-  if (!name) { toast('Bitte gib dem Teil einen Namen'); return; }
+  const link = $('#c-link').value.trim();
+  if (!link && !pendingImage) {
+    toast('Bitte Bild auswählen oder Shop-Link einfügen');
+    return;
+  }
   const item = {
     id: uid(),
-    name,
-    type,
-    link: $('#c-link').value.trim() || null,
+    name: $('#c-name').value.trim() || 'Neues Teil',
+    type: $('#c-type').value,
+    link: link || null,
     color: $('#c-color').value,
     image: pendingImage,
   };
@@ -224,11 +255,15 @@ $('#btn-add-item').addEventListener('click', () => {
   $('#c-name').value = '';
   $('#c-link').value = '';
   $('#c-image').value = '';
-  $('#c-preview').classList.add('hidden');
+  $('#c-detected').classList.add('hidden');
+  $('#c-details').removeAttribute('open');
+  $('#image-drop').classList.remove('has-image');
+  $('#image-drop-text').textContent = 'Produktbild auswählen';
   pendingImage = null;
+  pendingImageColor = null;
   renderItems();
   renderWearList();
-  toast('👕 „' + name + '“ hinzugefügt');
+  toast('„' + item.name + '“ hinzugefügt');
 });
 
 function itemRow(item, { wearable = false } = {}) {
@@ -237,7 +272,7 @@ function itemRow(item, { wearable = false } = {}) {
   const thumb = document.createElement('div');
   thumb.className = 'item-thumb';
   if (item.image) thumb.style.backgroundImage = `url(${item.image})`;
-  else { thumb.textContent = TYPE_ICONS[item.type] || '👕'; thumb.style.background = item.color; }
+  else { thumb.innerHTML = icon(TYPE_ICON[item.type] || 'shirt', 26); thumb.style.background = item.color; }
   row.appendChild(thumb);
 
   const info = document.createElement('div');
@@ -248,13 +283,13 @@ function itemRow(item, { wearable = false } = {}) {
   info.appendChild(nm);
   const meta = document.createElement('div');
   meta.className = 'meta';
-  meta.innerHTML = `<span class="color-dot" style="background:${item.color}"></span> ${TYPE_NAMES[item.type] || item.type}`;
+  meta.innerHTML = `<span class="color-dot" style="background:${item.color}"></span> ${TYPE_LABEL[item.type] || item.type}`;
   if (item.link) {
     const a = document.createElement('a');
     a.href = item.link;
     a.target = '_blank';
     a.rel = 'noopener';
-    a.textContent = '🔗 Shop';
+    a.innerHTML = icon('link', 12) + 'Shop';
     meta.appendChild(a);
   }
   info.appendChild(meta);
@@ -266,14 +301,14 @@ function itemRow(item, { wearable = false } = {}) {
     const worn = state.worn.includes(item.id);
     const btn = document.createElement('button');
     btn.className = 'icon-btn' + (worn ? ' active' : '');
-    btn.textContent = worn ? '✓' : '+';
+    btn.innerHTML = icon(worn ? 'check' : 'plus', 17);
     btn.title = worn ? 'Ausziehen' : 'Anziehen';
     btn.addEventListener('click', () => toggleWear(item.id));
     actions.appendChild(btn);
   } else {
     const del = document.createElement('button');
     del.className = 'icon-btn';
-    del.textContent = '🗑';
+    del.innerHTML = icon('trash', 16);
     del.title = 'Löschen';
     del.addEventListener('click', () => {
       state.items = state.items.filter((i) => i.id !== item.id);
@@ -341,7 +376,7 @@ function refreshAvatar() {
 
 $('#btn-autorotate').addEventListener('click', () => {
   const on = toggleAutoRotate();
-  $('#btn-autorotate').style.background = on ? 'linear-gradient(135deg,#8b7cf6,#6a5cd8)' : '';
+  $('#btn-autorotate').classList.toggle('on', on);
 });
 
 $('#btn-analyze').addEventListener('click', () => {
@@ -363,7 +398,7 @@ $('#btn-save-outfit').addEventListener('click', () => {
   store.save('outfits', state.outfits);
   $('#outfit-name').value = '';
   renderOutfits();
-  toast('💾 Outfit gespeichert');
+  toast('Outfit gespeichert');
 });
 
 function renderOutfits() {
@@ -382,7 +417,7 @@ function renderOutfits() {
     head.appendChild(name);
     const fav = document.createElement('button');
     fav.className = 'icon-btn' + (outfit.fav ? ' active' : '');
-    fav.textContent = outfit.fav ? '⭐' : '☆';
+    fav.innerHTML = icon(outfit.fav ? 'starFill' : 'star', 17);
     fav.title = 'Favorit';
     fav.addEventListener('click', () => {
       outfit.fav = !outfit.fav;
@@ -408,7 +443,7 @@ function renderOutfits() {
     actions.className = 'actions';
     const wear = document.createElement('button');
     wear.className = 'btn primary';
-    wear.textContent = '✨ Anziehen';
+    wear.textContent = 'Anziehen';
     wear.addEventListener('click', () => {
       state.worn = outfit.itemIds.filter((id) => state.items.some((i) => i.id === id));
       store.save('worn', state.worn);
@@ -457,7 +492,7 @@ $('#btn-save-rules').addEventListener('click', () => {
     favColors: [$('#fav-c1').value, $('#fav-c2').value, $('#fav-c3').value],
   };
   store.save('rules', state.rules);
-  toast('💡 Stilregeln gespeichert');
+  toast('Stilregeln gespeichert');
 });
 
 $('#btn-advise').addEventListener('click', () => {
