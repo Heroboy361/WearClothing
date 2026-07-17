@@ -1,5 +1,5 @@
-// Service Worker: macht die App offline nutzbar (PWA).
-const CACHE = 'wearclothing-v6';
+// Service Worker: macht die App-Oberfläche offline nutzbar (PWA).
+const CACHE = 'wearclothing-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -7,9 +7,12 @@ const ASSETS = [
   './js/lock.js',
   './js/app.js',
   './js/icons.js',
-  './js/detect.js',
-  './js/tryon.js',
+  './js/db.js',
+  './js/openai.js',
+  './js/gemini.js',
   './js/advisor.js',
+  './fonts/instrument-sans-latin-wght-normal.woff2',
+  './fonts/instrument-sans-latin-ext-wght-normal.woff2',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-180.png',
@@ -20,7 +23,6 @@ const ASSETS = [
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE).then((cache) =>
-      // Einzeln cachen, damit ein fehlgeschlagenes Asset nicht die Installation blockiert
       Promise.allSettled(ASSETS.map((a) => cache.add(a)))
     ).then(() => self.skipWaiting())
   );
