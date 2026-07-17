@@ -35,6 +35,12 @@ const PATHS = {
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="8" r="0.4" fill="currentColor"/>',
   arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   ruler: '<rect x="2.5" y="9" width="19" height="6" rx="1.5"/><path d="M6.5 9v2.5M10 9v3.5M13.5 9v2.5M17 9v3.5"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  upload: '<path d="M12 15V4M7 8.5L12 3.5l5 5"/><path d="M4 15v4a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-4"/>',
+  spinner: '<path d="M12 3a9 9 0 1 1-6.4 2.6"/>',
+  warning: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.5" r="0.4" fill="currentColor"/>',
+  retry: '<path d="M4 12a8 8 0 1 1 2.3 5.6"/><path d="M4 21v-4h4"/>',
+  gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1"/>',
 };
 
 export function icon(name, size = 20, cls = '') {
