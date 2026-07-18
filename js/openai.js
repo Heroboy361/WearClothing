@@ -71,6 +71,8 @@ export function normalizeMetadata(value = {}) {
     part: PART_IDS.has(m.part) ? m.part : 'upperbody',
     color: typeof m.color === 'string' && HEX_COLOR.test(m.color) ? m.color.toLowerCase() : '#d8d0c2',
     secondaryColor: typeof m.secondaryColor === 'string' && HEX_COLOR.test(m.secondaryColor) ? m.secondaryColor.toLowerCase() : null,
+    material: typeof m.material === 'string' && m.material.trim() ? m.material.trim().slice(0, 40) : null,
+    pattern: typeof m.pattern === 'string' && m.pattern.trim() ? m.pattern.trim().slice(0, 40) : null,
     tags: Array.isArray(m.tags) ? m.tags.filter((t) => typeof t === 'string').map((t) => t.trim().toLowerCase().slice(0, 40)).filter(Boolean).slice(0, 12) : [],
     boundingBox: normalizeBoundingBox(m.boundingBox),
   };
@@ -117,6 +119,9 @@ export function buildGarmentPrompt(metadata = {}, chromaKey = '#00ff00') {
   const details = Array.isArray(metadata.tags) && metadata.tags.length
     ? metadata.tags.join(', ')
     : 'all visible construction and design details';
+  const fabric = metadata.material ? `, made of ${metadata.material}` : '';
+  const isPlain = !metadata.pattern || /^(uni|einfarbig|solid|plain)/i.test(metadata.pattern);
+  const patternText = !isPlain ? ` with a ${metadata.pattern} pattern` : '';
 
   return `Use case: background-extraction
 Asset type: ecommerce catalog product cutout source
@@ -125,7 +130,7 @@ Input image: The reference photograph shows the exact garment, either by itself 
 
 Primary request: Reconstruct ONLY the complete empty ${name} (${category}) as a clean, front-facing ecommerce catalog product photograph. If a wearer is present, remove them. Remove every other garment, object, and background element. Show the complete item naturally arranged and symmetrical, with no person, body, mannequin, or hanger visible.
 
-Garment fidelity: Preserve the reference garment's exact primary color ${primary}${secondary}, material and texture, silhouette, neckline, sleeves, fastenings, pattern, and distinctive details (${details}). Preserve any clearly legible existing graphic or logo exactly, but do not invent or reinterpret uncertain logos, text, pockets, seams, hardware, colors, or decoration.
+Garment fidelity: Preserve the reference garment's exact primary color ${primary}${secondary}${fabric}${patternText}, material and fabric texture (weave, knit, nap, ribbing – e.g. terry cloth/toweling, corduroy ridges, denim twill, knit structure, whatever is actually visible), silhouette, neckline, sleeves, fastenings, and distinctive details (${details}). Preserve any clearly legible existing graphic or logo exactly, but do not invent or reinterpret uncertain logos, text, pockets, seams, hardware, colors, or decoration.
 
 Composition: Centered straight-on product view. Keep the entire garment inside the frame with generous, even padding on every side. No cropping or truncation.
 
@@ -187,6 +192,8 @@ const ANALYZE_SCHEMA = {
           part: { type: 'string', enum: ['upperbody', 'wholebody_up', 'lowerbody', 'accessories_up', 'shoes'] },
           color: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$' },
           secondaryColor: { anyOf: [{ type: 'string', pattern: '^#[0-9A-Fa-f]{6}$' }, { type: 'null' }] },
+          material: { type: 'string' },
+          pattern: { type: 'string' },
           tags: { type: 'array', items: { type: 'string' }, maxItems: 4 },
           boundingBox: {
             type: 'object', additionalProperties: false,
@@ -199,7 +206,7 @@ const ANALYZE_SCHEMA = {
             required: ['x', 'y', 'width', 'height'],
           },
         },
-        required: ['name', 'part', 'color', 'secondaryColor', 'tags', 'boundingBox'],
+        required: ['name', 'part', 'color', 'secondaryColor', 'material', 'pattern', 'tags', 'boundingBox'],
       },
     },
   },
@@ -213,7 +220,7 @@ export async function openAIAnalyze({ key, model, imageDataUrl }) {
     body: JSON.stringify({
       model: model || DEFAULTS.visionModel,
       input: [{ role: 'user', content: [
-        { type: 'input_text', text: "Identify every distinct wearable clothing item visible in this image. A photo may show one isolated garment or a person wearing several items. Return one record per actual item that should enter a wardrobe. Ignore the person's body and non-wearable background objects. For each item, include a tight bounding box around only that item using integer coordinates normalized to a 1000 by 1000 image: x and y are the top-left corner, followed by width and height. Boxes may overlap when garments overlap, but each box must focus on one distinct item. Use only these category ids: upperbody, wholebody_up, lowerbody, accessories_up, shoes. Suggest a concise specific name in German, primary hex color, optional genuinely distinct secondary hex color, and 1-4 useful lowercase German detail tags." },
+        { type: 'input_text', text: "Identify every distinct wearable clothing item visible in this image. A photo may show one isolated garment or a person wearing several items. Return one record per actual item that should enter a wardrobe. Ignore the person's body and non-wearable background objects. For each item, include a tight bounding box around only that item using integer coordinates normalized to a 1000 by 1000 image: x and y are the top-left corner, followed by width and height. Boxes may overlap when garments overlap, but each box must focus on one distinct item. Use only these category ids: upperbody, wholebody_up, lowerbody, accessories_up, shoes. Suggest a concise specific name in German, primary hex color, optional genuinely distinct secondary hex color, and 1-4 useful lowercase German detail tags. Also look closely at the actual fabric surface (weave, knit, nap, sheen, ribbing) rather than just the color, and fill 'material' with the fabric in German from categories like: Baumwolle, Frottee/Frotteestoff (terry cloth/toweling, looks like a towel), Cord, Denim/Jeansstoff, Leinen, Wolle, Strickware, Fleece, Leder, Kunstleder, Wildleder, Seide, Satin, Samt, Chiffon, Spitze, Neopren, Polyester, Netzstoff/Mesh, Filz (or the closest accurate description if none fit); fill 'pattern' in German from categories like: Uni/Einfarbig, Gestreift, Kariert, Geblümt, Gepunktet, Animal Print, Camouflage, Paisley, Colorblock, Aufdruck/Print, Ombré (or the closest accurate description). Use 'Uni/Einfarbig' as pattern only when the surface is genuinely a single flat color with no texture-based pattern." },
         { type: 'input_image', image_url: imageDataUrl },
       ] }],
       text: { format: { type: 'json_schema', name: 'wardrobe_items', strict: true, schema: ANALYZE_SCHEMA } },
