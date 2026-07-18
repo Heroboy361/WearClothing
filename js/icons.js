@@ -37,6 +37,7 @@ const PATHS = {
   ruler: '<rect x="2.5" y="9" width="19" height="6" rx="1.5"/><path d="M6.5 9v2.5M10 9v3.5M13.5 9v2.5M17 9v3.5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   upload: '<path d="M12 15V4M7 8.5L12 3.5l5 5"/><path d="M4 15v4a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-4"/>',
+  download: '<path d="M12 4v11M7 10.5L12 15.5l5-5"/><path d="M4 15v4a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-4"/>',
   spinner: '<path d="M12 3a9 9 0 1 1-6.4 2.6"/>',
   warning: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.5" r="0.4" fill="currentColor"/>',
   retry: '<path d="M4 12a8 8 0 1 1 2.3 5.6"/><path d="M4 21v-4h4"/>',

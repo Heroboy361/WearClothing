@@ -1474,6 +1474,116 @@ $('#btn-look-save').addEventListener('click', async () => {
   renderLooks();
 });
 
+/* ================= DATENSICHERUNG (Export/Import) ================= */
+
+$('#backup-export-icon').innerHTML = icon('download', 16);
+$('#backup-import-icon').innerHTML = icon('upload', 16);
+
+// Sammelt alle Bild-Schlüssel, die aktuell irgendwo referenziert werden
+function collectImageKeys() {
+  const keys = new Set(['model-reference']);
+  for (const item of state.items) {
+    if (item.imageKey) keys.add(item.imageKey);
+    if (item.modeledKey) keys.add(item.modeledKey);
+    if (item.cropKey) keys.add(item.cropKey);
+  }
+  for (const look of state.looks) {
+    if (look.imageKey) keys.add(look.imageKey);
+  }
+  return [...keys];
+}
+
+$('#backup-export').addEventListener('click', async () => {
+  const btn = $('#backup-export');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="import-spinner">${icon('spinner', 16)}</span> ${t('regen.working')}`;
+  try {
+    const images = {};
+    for (const key of collectImageKeys()) {
+      const data = await imageStore.get(key);
+      if (data) images[key] = data;
+    }
+    const backup = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      lang: getLang(),
+      settings: state.settings,
+      rules: state.rules,
+      usage: state.usage,
+      items: state.items,
+      looks: state.looks,
+      images,
+    };
+    const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `wearclothing-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    notify(t('backup.exported'));
+  } catch (e) {
+    console.warn(e);
+    notify(t('backup.exportFailed'));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+});
+
+$('#backup-import').addEventListener('click', () => $('#backup-import-input').click());
+$('#backup-import-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data || typeof data !== 'object' || !Array.isArray(data.items) || typeof data.settings !== 'object') {
+      notify(t('backup.invalidFile'));
+      return;
+    }
+    if (!confirm(t('backup.importConfirm'))) return;
+
+    for (const [key, dataUrl] of Object.entries(data.images || {})) {
+      await imageStore.put(key, dataUrl);
+      imageCache.set(key, dataUrl);
+    }
+    state.settings = { ...state.settings, ...data.settings };
+    state.rules = data.rules || state.rules;
+    state.usage = data.usage || state.usage;
+    state.items = data.items || [];
+    state.looks = data.looks || [];
+    store.save('settings', state.settings);
+    store.save('rules', state.rules);
+    store.save('usage', state.usage);
+    store.save('items', state.items);
+    store.save('looks', state.looks);
+    if (data.lang && data.lang !== getLang()) setLang(data.lang);
+
+    state.hasModelReference = !!(await imageStore.get('model-reference'));
+    const prev = $('#set-photo-preview');
+    if (state.hasModelReference) { prev.src = await imageStore.get('model-reference'); prev.classList.remove('hidden'); }
+    else prev.classList.add('hidden');
+
+    applyTheme(state.settings.theme || currentTheme());
+    applyStaticTranslations();
+    $('#toggle-lang').textContent = getLang().toUpperCase();
+    renderCategoryNav();
+    await renderGallery();
+    await renderLooks();
+    renderTrayButton();
+    openSettings(); // Felder (inkl. Schlüssel) mit den wiederhergestellten Werten neu befüllen
+    notify(t('backup.imported'));
+  } catch (err) {
+    console.warn(err);
+    notify(t('backup.invalidFile'));
+  }
+});
+
 /* ================= EINSTELLUNGEN ================= */
 
 function openSettings() {
