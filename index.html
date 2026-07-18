@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>WearClothing – Wardrobe</title>
   <meta name="description" content="Dein Kleiderschrank – Teile importieren, freistellen, an dir selbst als Model-Foto sehen und Looks stylen.">
-  <meta name="theme-color" content="#f4f0e8">
+  <meta name="theme-color" content="#f4f0e8" id="theme-color-meta">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -14,6 +14,16 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="WearClothing">
   <link rel="stylesheet" href="css/styles.css">
+  <script>
+    // Theme früh setzen, damit kein Aufblitzen entsteht
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem('wearclothing.settings') || '{}');
+        var theme = s.theme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = theme;
+      } catch (e) { document.documentElement.dataset.theme = 'light'; }
+    })();
+  </script>
   <script src="js/lock.js"></script>
 </head>
 <body>
@@ -21,138 +31,154 @@
     <main class="gallery-pane">
       <header class="gallery-header">
         <div class="gallery-meta-row">
-          <p class="piece-count" id="piece-count">0 Teile</p>
+          <p class="piece-count" id="piece-count">0</p>
           <div class="header-tools">
-            <button type="button" class="header-tool" id="nav-wardrobe">Kleiderschrank</button>
-            <button type="button" class="header-tool" id="nav-looks">Looks</button>
-            <button type="button" class="header-tool" id="nav-settings" aria-label="Einstellungen"></button>
+            <button type="button" class="header-tool" id="nav-wardrobe" data-i18n="nav.wardrobe">Kleiderschrank</button>
+            <button type="button" class="header-tool" id="nav-looks" data-i18n="nav.looks">Looks</button>
+            <button type="button" class="header-tool icon-only" id="toggle-lang" data-i18n-aria="lang.toggle">DE</button>
+            <button type="button" class="header-tool icon-only" id="toggle-theme" data-i18n-aria="theme.toggle"></button>
+            <button type="button" class="header-tool icon-only" id="nav-settings" data-i18n-aria="settings.aria"></button>
           </div>
         </div>
-        <nav class="category-nav" id="category-nav" aria-label="Kleiderschrank nach Kategorie filtern"></nav>
+        <nav class="category-nav" id="category-nav" aria-label="Kategorie"></nav>
       </header>
 
       <p class="status error hidden" id="status-error"></p>
-      <p class="status empty hidden" id="status-empty">Ziehe ein Foto hierher, füge es ein oder wähle es unten links aus, um dein erstes Teil zu importieren.</p>
+      <p class="status empty hidden" id="status-empty" data-i18n="empty.wardrobe"></p>
 
-      <section class="gallery-grid" id="gallery-grid" aria-label="Kleiderschrank"></section>
+      <section class="gallery-grid" id="gallery-grid" aria-label="Wardrobe"></section>
 
       <section class="looks-pane hidden" id="looks-pane">
         <div class="looks-composer">
-          <h2>Neuer Look</h2>
-          <p class="looks-hint">Wähle Teile aus deinem Kleiderschrank – die Bild-KI zieht sie dir auf deinem Referenzfoto als komplettes Outfit an. Der Stilberater bewertet die Auswahl vorab nach deinen Farbregeln.</p>
+          <h2 data-i18n="looks.newTitle">Neuer Look</h2>
+          <p class="looks-hint" data-i18n="looks.hint"></p>
           <div class="look-picker" id="look-picker"></div>
-          <p class="looks-hint hidden" id="look-picker-empty">Noch keine Teile im Kleiderschrank – importiere zuerst welche.</p>
-          <label class="look-note"><input type="text" id="look-note" placeholder="Styling-Wunsch (optional), z. B. „abends in der Stadt“"></label>
+          <p class="looks-hint hidden" id="look-picker-empty" data-i18n="looks.pickerEmpty"></p>
+          <label class="look-note"><input type="text" id="look-note" data-i18n-ph="looks.notePh"></label>
           <p class="advice-note hidden" id="look-advice"></p>
           <div class="viewer-actions">
-            <button type="button" class="secondary-button" id="btn-look-advise">Stil-Check</button>
+            <button type="button" class="secondary-button" id="btn-look-advise" data-i18n="looks.advise">Stil-Check</button>
             <span class="action-spacer"></span>
-            <button type="button" class="primary-button" id="btn-look-generate">Look generieren</button>
+            <button type="button" class="primary-button" id="btn-look-generate" data-i18n="looks.generate">Look generieren</button>
           </div>
           <div class="look-result hidden" id="look-result">
-            <img alt="Generierter Look">
+            <img alt="Look">
             <div class="viewer-actions" style="padding: 10px 12px">
-              <input type="text" id="look-name" placeholder="Name des Looks" style="flex:1; min-width:0; border:1px solid var(--line); padding:8px 10px; background:rgba(255,255,255,.2); font:inherit; font-size:13px">
-              <button type="button" class="primary-button" id="btn-look-save">Speichern</button>
+              <input type="text" id="look-name" data-i18n-ph="looks.namePh" style="flex:1; min-width:0; border:1px solid var(--line); padding:8px 10px; background:var(--input-bg); color:var(--ink); font:inherit; font-size:13px">
+              <button type="button" class="primary-button" id="btn-look-save" data-i18n="btn.save">Speichern</button>
             </div>
           </div>
         </div>
         <div class="looks-saved">
-          <h2>Gespeicherte Looks</h2>
-          <p class="looks-hint hidden" id="looks-empty" style="margin-top:14px">Noch keine Looks gespeichert.</p>
+          <h2 data-i18n="looks.saved">Gespeicherte Looks</h2>
+          <p class="looks-hint hidden" id="looks-empty" data-i18n="looks.empty" style="margin-top:14px"></p>
           <div class="looks-grid" id="looks-grid"></div>
         </div>
       </section>
     </main>
 
-    <!-- Import: Ablage-Overlay für Drag & Drop / Einfügen -->
     <input type="file" id="import-input" accept="image/*" multiple hidden>
     <div class="import-drop-overlay" id="drop-overlay" data-active="false" aria-hidden="true">
       <div class="import-drop-target is-over">
         <span id="drop-icon"></span>
-        <h2>Kleidungsfotos ablegen</h2>
-        <p>Ein einzelnes Teil oder ein Foto eines kompletten Outfits – beides funktioniert. Dein Kleiderschrank bleibt, wie er ist.</p>
+        <h2 data-i18n="drop.title">Kleidungsfotos ablegen</h2>
+        <p data-i18n="drop.sub"></p>
       </div>
     </div>
 
-    <!-- Import: Tray unten links -->
-    <aside class="import-tray" id="import-tray" aria-label="Kleiderschrank-Importe">
-      <button class="import-tray__button" type="button" id="tray-button" aria-label="Kleidung hinzufügen"></button>
+    <aside class="import-tray" id="import-tray" aria-label="Import">
+      <button class="import-tray__button" type="button" id="tray-button" data-i18n-aria="tray.add"></button>
       <div class="import-tray__actions">
         <img class="import-tray__preview hidden" id="tray-preview" alt="">
-        <span class="import-tray__label" id="tray-label">Kleidung hinzufügen</span>
-        <button class="import-icon-button" type="button" id="tray-upload" aria-label="Bilder auswählen"></button>
+        <span class="import-tray__label" id="tray-label"></span>
+        <button class="import-icon-button" type="button" id="tray-upload" data-i18n-aria="tray.upload"></button>
       </div>
     </aside>
 
-    <!-- Import: Popover -->
     <div class="import-popover-backdrop" id="import-backdrop" data-open="false">
-      <section class="import-popover" role="dialog" aria-modal="true" aria-labelledby="import-title">
+      <section class="import-popover" role="dialog" aria-modal="true">
         <header class="import-popover__header">
           <div>
-            <p class="import-popover__eyebrow">Kleiderschrank-Import</p>
-            <h2 class="import-popover__title" id="import-title">Zum Kleiderschrank hinzufügen</h2>
+            <p class="import-popover__eyebrow" data-i18n="import.eyebrow">Kleiderschrank-Import</p>
+            <h2 class="import-popover__title" id="import-title"></h2>
           </div>
-          <button class="import-icon-button" type="button" id="import-close" aria-label="Import schließen"></button>
+          <button class="import-icon-button" type="button" id="import-close" data-i18n-aria="import.close"></button>
         </header>
         <div id="import-body"></div>
         <div class="import-link-row">
-          <input type="url" id="import-link" placeholder="Oder Shop-Link einfügen …" inputmode="url" autocomplete="off" class="import-field-input" style="padding:11px 12px;color:var(--import-ink);background:transparent;border:1px solid var(--import-line);border-radius:10px;font:inherit;font-size:13px">
-          <button class="import-button" type="button" id="import-link-add">Link importieren</button>
+          <input type="url" id="import-link" data-i18n-ph="import.link.ph" inputmode="url" autocomplete="off" style="padding:11px 12px;color:var(--import-ink);background:transparent;border:1px solid var(--import-line);border-radius:10px;font:inherit;font-size:13px">
+          <button class="import-button" type="button" id="import-link-add" data-i18n="import.link.add">Link importieren</button>
         </div>
         <p class="import-status is-error hidden" id="import-error" role="alert"></p>
       </section>
     </div>
 
-    <!-- Einstellungen -->
     <div class="import-popover-backdrop" id="settings-backdrop" data-open="false">
-      <section class="import-popover" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <section class="import-popover" role="dialog" aria-modal="true">
         <header class="import-popover__header">
           <div>
             <p class="import-popover__eyebrow">WearClothing</p>
-            <h2 class="import-popover__title" id="settings-title">Einstellungen</h2>
+            <h2 class="import-popover__title" data-i18n="settings.title">Einstellungen</h2>
           </div>
-          <button class="import-icon-button" type="button" id="settings-close" aria-label="Einstellungen schließen"></button>
+          <button class="import-icon-button" type="button" id="settings-close" data-i18n-aria="settings.close"></button>
         </header>
         <div class="settings-fields">
-          <p class="settings-section">OpenAI (Import &amp; Model-Fotos)</p>
+          <p class="settings-section" data-i18n="settings.appSection">Darstellung</p>
           <div class="import-field">
-            <label for="set-openai">OpenAI-API-Schlüssel</label>
+            <label data-i18n="settings.language">Sprache</label>
+            <select id="set-language"><option value="de">Deutsch</option><option value="en">English</option></select>
+          </div>
+          <div class="import-field">
+            <label data-i18n="settings.theme">Design</label>
+            <select id="set-theme"><option value="light" data-i18n="settings.themeLight">Hell</option><option value="dark" data-i18n="settings.themeDark">Dunkel</option></select>
+          </div>
+
+          <p class="settings-section" data-i18n="settings.usageSection">OpenAI-Nutzungslimit</p>
+          <div class="import-field">
+            <label for="set-usage" data-i18n="settings.usageLimit">Max. KI-Bilder pro Tag</label>
+            <input type="number" id="set-usage" min="0" max="999" step="1" value="40">
+          </div>
+          <p class="settings-note" id="usage-today"></p>
+          <p class="settings-note" data-i18n="settings.usageNote"></p>
+
+          <p class="settings-section" data-i18n="settings.openaiSection">OpenAI</p>
+          <div class="import-field">
+            <label for="set-openai" data-i18n="settings.openaiKey">OpenAI-API-Schlüssel</label>
             <input type="password" id="set-openai" placeholder="sk-…" autocomplete="off">
           </div>
-          <p class="settings-note">Nötig für Import, Freisteller und Model-Fotos. Schlüssel unter <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a> erstellen – er bleibt nur auf diesem Gerät.</p>
+          <p class="settings-note" data-i18n="settings.openaiNote"></p>
           <div class="import-field">
-            <label for="set-image-model">Bildmodell (GPT Image)</label>
+            <label for="set-image-model" data-i18n="settings.imageModel">Bildmodell</label>
             <input type="text" id="set-image-model" placeholder="gpt-image-2">
           </div>
           <div class="import-field">
-            <label for="set-vision-model">Analysemodell</label>
+            <label for="set-vision-model" data-i18n="settings.visionModel">Analysemodell</label>
             <input type="text" id="set-vision-model" placeholder="gpt-5.4-mini">
           </div>
 
-          <p class="settings-section">Referenzfoto (dein Model)</p>
+          <p class="settings-section" data-i18n="settings.refSection">Referenzfoto</p>
           <div class="settings-photo-row">
-            <img id="set-photo-preview" class="hidden" alt="Referenzfoto">
-            <button type="button" class="import-button" id="set-photo-button">Ganzkörperfoto wählen</button>
+            <img id="set-photo-preview" class="hidden" alt="">
+            <button type="button" class="import-button" id="set-photo-button" data-i18n="settings.refChoose">Ganzkörperfoto wählen</button>
             <input type="file" id="set-photo" accept="image/*" hidden>
           </div>
-          <p class="settings-note">Auf diesem Foto trägt die KI deine importierten Teile. Gut beleuchtet, ganzer Körper sichtbar. Es bleibt lokal und wird nur beim Generieren an OpenAI übertragen.</p>
+          <p class="settings-note" data-i18n="settings.refNote"></p>
 
-          <p class="settings-section">Shop-Link-Import (optional)</p>
+          <p class="settings-section" data-i18n="settings.linkSection">Shop-Link-Import</p>
           <div class="import-field">
-            <label for="set-gemini">Google-Gemini-Schlüssel</label>
+            <label for="set-gemini" data-i18n="settings.geminiKey">Google-Gemini-Schlüssel</label>
             <input type="password" id="set-gemini" placeholder="AIza…" autocomplete="off">
           </div>
-          <p class="settings-note">Liest Produktseiten hinter Shop-Links (Name, Farbe, Größe, Marke). Kostenlos unter <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Ohne Schlüssel wird der Link-Text lokal ausgewertet.</p>
+          <p class="settings-note" data-i18n="settings.geminiNote"></p>
 
-          <p class="settings-section">Stilregeln (für den Stil-Check)</p>
-          <label class="settings-check"><input type="checkbox" id="r-max3" checked> Maximal 3 Farben pro Look</label>
-          <label class="settings-check"><input type="checkbox" id="r-mono"> Monochrom / Ton-in-Ton bevorzugen</label>
-          <label class="settings-check"><input type="checkbox" id="r-neutral"> Neutrale Basisfarben bevorzugen</label>
-          <label class="settings-check"><input type="checkbox" id="r-accent" checked> Eine Akzentfarbe erlaubt</label>
-          <label class="settings-check"><input type="checkbox" id="r-metal" checked> Schmuck-Metalle abstimmen</label>
+          <p class="settings-section" data-i18n="settings.rulesSection">Stilregeln</p>
+          <label class="settings-check"><input type="checkbox" id="r-max3" checked> <span data-i18n="rule.max3"></span></label>
+          <label class="settings-check"><input type="checkbox" id="r-mono"> <span data-i18n="rule.mono"></span></label>
+          <label class="settings-check"><input type="checkbox" id="r-neutral"> <span data-i18n="rule.neutral"></span></label>
+          <label class="settings-check"><input type="checkbox" id="r-accent" checked> <span data-i18n="rule.accent"></span></label>
+          <label class="settings-check"><input type="checkbox" id="r-metal" checked> <span data-i18n="rule.metal"></span></label>
           <div class="import-field">
-            <label>Lieblingsfarben</label>
+            <label data-i18n="settings.favColors">Lieblingsfarben</label>
             <div class="settings-colors">
               <input type="color" id="fav-c1" value="#1f2937">
               <input type="color" id="fav-c2" value="#e5e0d8">
@@ -161,7 +187,7 @@
           </div>
 
           <div class="import-actions">
-            <button type="button" class="import-button import-button--primary" id="settings-save">Speichern</button>
+            <button type="button" class="import-button import-button--primary" id="settings-save" data-i18n="settings.save">Speichern</button>
           </div>
         </div>
       </section>

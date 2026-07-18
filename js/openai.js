@@ -4,8 +4,8 @@
 // Alle Aufrufe laufen direkt vom Gerät zur OpenAI-API mit dem Schlüssel des Nutzers.
 
 export const DEFAULTS = {
-  imageModel: 'gpt-image-2',
-  visionModel: 'gpt-5.4-mini',
+  imageModel: 'gpt-image-1',   // reales OpenAI-Bildmodell (Freisteller & Model-Fotos)
+  visionModel: 'gpt-4o',       // Vision + strukturierte Ausgabe für die Teile-Erkennung
   quality: 'high',
 };
 

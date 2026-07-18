@@ -1,11 +1,12 @@
 // Service Worker: macht die App-Oberfläche offline nutzbar (PWA).
-const CACHE = 'wearclothing-v7';
+const CACHE = 'wearclothing-v8';
 const ASSETS = [
   './',
   './index.html',
   './css/styles.css',
   './js/lock.js',
   './js/app.js',
+  './js/i18n.js',
   './js/icons.js',
   './js/db.js',
   './js/openai.js',

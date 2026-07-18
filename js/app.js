@@ -4,19 +4,14 @@ import { icon } from './icons.js';
 import * as ai from './openai.js';
 import { analyzeShopUrl } from './gemini.js';
 import { analyzeOutfit } from './advisor.js';
+import { t, getLang, setLang, applyStaticTranslations } from './i18n.js';
 
 /* ---------- Konstanten ---------- */
 
-const TYPES = [
-  { id: 'all', label: 'Alle' },
-  { id: 'upperbody', label: 'Oberteile', singular: 'Oberteil' },
-  { id: 'wholebody_up', label: 'Jacken', singular: 'Jacke' },
-  { id: 'lowerbody', label: 'Unterteile', singular: 'Unterteil' },
-  { id: 'accessories_up', label: 'Accessoires', singular: 'Accessoire' },
-  { id: 'shoes', label: 'Schuhe', singular: 'Schuhe' },
-];
-const TYPE_MAP = Object.fromEntries(TYPES.map((t) => [t.id, t]));
-const TYPE_ORDER = Object.fromEntries(TYPES.slice(1).map((t, i) => [t.id, i]));
+const TYPE_IDS = ['all', 'upperbody', 'wholebody_up', 'lowerbody', 'accessories_up', 'shoes'];
+const TYPE_ORDER = Object.fromEntries(TYPE_IDS.slice(1).map((id, i) => [id, i]));
+const typeLabel = (id) => t(`type.${id}`);
+const typeSingular = (id) => t(`type.${id}.one`);
 // Abbildung Kategorie -> Stilberater-Typ (für die Farbanalyse)
 const ADVISOR_TYPE = { upperbody: 'tshirt', wholebody_up: 'jacke', lowerbody: 'hose', shoes: 'schuhe', accessories_up: 'kette' };
 
@@ -36,13 +31,50 @@ const store = {
 const state = {
   items: store.load('items', []),
   looks: store.load('looks', []),
-  settings: store.load('settings', { openaiKey: '', geminiKey: '', imageModel: ai.DEFAULTS.imageModel, visionModel: ai.DEFAULTS.visionModel }),
+  settings: store.load('settings', { openaiKey: '', geminiKey: '', imageModel: ai.DEFAULTS.imageModel, visionModel: ai.DEFAULTS.visionModel, theme: '', usageLimit: 40 }),
   rules: store.load('rules', { max3: true, mono: false, neutral: false, accent: true, metal: true, favColors: ['#1f2937', '#e5e0d8', '#7a2e2e'] }),
+  usage: store.load('usage', { day: '', count: 0 }),
   activeType: 'all',
   view: 'wardrobe',
   selectedId: null,
   hasModelReference: false,
 };
+// Alte, ungültige Platzhalter-Modelle automatisch auf echte OpenAI-Modelle heben
+if (['gpt-image-2', ''].includes(state.settings.imageModel)) state.settings.imageModel = ai.DEFAULTS.imageModel;
+if (['gpt-5.4-mini', ''].includes(state.settings.visionModel)) state.settings.visionModel = ai.DEFAULTS.visionModel;
+if (typeof state.settings.usageLimit !== 'number') state.settings.usageLimit = 40;
+
+/* ---------- OpenAI-Nutzungslimit (Bild-Generierungen pro Tag) ---------- */
+function todayKey() { return new Date().toISOString().slice(0, 10); }
+function usageLeft() {
+  const limit = state.settings.usageLimit || 0;
+  if (!limit) return Infinity;
+  if (state.usage.day !== todayKey()) return limit;
+  return Math.max(0, limit - state.usage.count);
+}
+function bumpUsage(n = 1) {
+  const today = todayKey();
+  if (state.usage.day !== today) state.usage = { day: today, count: 0 };
+  state.usage.count += n;
+  store.save('usage', state.usage);
+}
+// Prüft vor einer Generierung, ob noch Budget da ist
+function canGenerate() {
+  if (usageLeft() <= 0) {
+    notify(t('err.limit', state.settings.usageLimit));
+    return false;
+  }
+  return true;
+}
+
+// Überall sichtbarer, kurzlebiger Hinweis
+function notify(msg) {
+  const el = document.createElement('div');
+  el.className = 'app-toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
 
 // Bild-Cache: storageKey -> dataURL (für synchrones Rendern)
 const imageCache = new Map();
@@ -83,13 +115,13 @@ $('#nav-settings').addEventListener('click', openSettings);
 function renderCategoryNav() {
   const nav = $('#category-nav');
   nav.innerHTML = '';
-  for (const type of TYPES) {
+  for (const id of TYPE_IDS) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = type.label;
-    btn.className = state.activeType === type.id ? 'active' : '';
-    btn.setAttribute('aria-pressed', state.activeType === type.id);
-    btn.addEventListener('click', () => { state.activeType = type.id; state.selectedId = null; renderCategoryNav(); renderGallery(); });
+    btn.textContent = typeLabel(id);
+    btn.className = state.activeType === id ? 'active' : '';
+    btn.setAttribute('aria-pressed', state.activeType === id);
+    btn.addEventListener('click', () => { state.activeType = id; state.selectedId = null; renderCategoryNav(); renderGallery(); });
     nav.appendChild(btn);
   }
 }
@@ -113,7 +145,7 @@ async function renderGallery() {
     const btn = document.createElement('button');
     btn.className = 'gallery-item' + (state.selectedId === item.id ? ' selected' : '');
     btn.type = 'button';
-    btn.setAttribute('aria-label', `${item.name || 'Teil'} ansehen`);
+    btn.setAttribute('aria-label', `${item.name || t('viewer.newPiece')}`);
     const src = await cacheImage(item.imageKey);
     if (src) {
       const img = document.createElement('img');
@@ -129,7 +161,7 @@ async function renderGallery() {
     btn.addEventListener('click', () => openViewer(item.id));
     grid.appendChild(btn);
   }
-  $('#piece-count').textContent = `${state.items.length} ${state.items.length === 1 ? 'Teil' : 'Teile'}`;
+  $('#piece-count').textContent = t('pieces', state.items.length);
   updateEmptyStates();
 }
 
@@ -199,7 +231,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
   overlay.className = 'viewer-overlay';
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) requestClose(); });
 
-  const singular = TYPE_MAP[item.part]?.singular || 'Teil';
+  const singular = typeSingular(item.part) || t('viewer.newPiece');
   const draft = { name: item.name || '', part: item.part, color: item.color || '#9a9286', secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] };
   let palette = [...(item.palette || [])];
   let sampling = null;
@@ -307,11 +339,11 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     const slot = document.createElement('div');
     slot.className = 'color-slot' + (optional && !value ? ' empty-color-slot' : '');
     if (optional && !value) {
-      slot.innerHTML = `<div class="color-slot-heading"><span>${label}</span><small>Optional</small></div><p>Keine eindeutige Zweitfarbe erkannt.</p>`;
+      slot.innerHTML = `<div class="color-slot-heading"><span>${label}</span><small>${t('field.optional')}</small></div><p>${t('field.noSecondary')}</p>`;
       const add = document.createElement('button');
       add.className = 'add-secondary-button';
       add.type = 'button';
-      add.textContent = 'Zweitfarbe hinzufügen';
+      add.textContent = t('field.addSecondary');
       add.addEventListener('click', () => { draft.secondaryColor = palette.find((c) => c.toLowerCase() !== draft.color?.toLowerCase()) || '#9a9286'; render(); });
       slot.appendChild(add);
       return slot;
@@ -321,7 +353,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     heading.innerHTML = `<span>${label}</span>`;
     if (optional) {
       const rm = document.createElement('button');
-      rm.type = 'button'; rm.textContent = 'Entfernen';
+      rm.type = 'button'; rm.textContent = t('field.remove');
       rm.addEventListener('click', () => { draft.secondaryColor = null; render(); });
       heading.appendChild(rm);
     }
@@ -338,7 +370,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
 
     const sh = document.createElement('div');
     sh.className = 'suggestion-heading';
-    sh.innerHTML = '<span>Vorschläge aus dem Bild</span><small>Zum Übernehmen tippen</small>';
+    sh.innerHTML = `<span>${t('field.suggestions')}</span><small>${t('field.applyTip')}</small>`;
     slot.appendChild(sh);
 
     const pal = document.createElement('div');
@@ -349,7 +381,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     const sampleBtn = document.createElement('button');
     sampleBtn.className = 'sample-button' + (sampling === field ? ' active' : '');
     sampleBtn.type = 'button';
-    sampleBtn.textContent = sampling === field ? 'Abbrechen' : `${label} aus Bild wählen`;
+    sampleBtn.textContent = sampling === field ? t('field.cancelPick') : t('field.pickFrom', label);
     sampleBtn.addEventListener('click', () => { sampling = sampling === field ? null : field; render(); });
     slot.appendChild(sampleBtn);
     return slot;
@@ -361,7 +393,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
 
     const nameField = document.createElement('label');
     nameField.className = 'field';
-    nameField.innerHTML = '<span>Name</span>';
+    nameField.innerHTML = `<span>${t('field.name')}</span>`;
     const nameInput = document.createElement('input');
     nameInput.value = draft.name;
     nameInput.placeholder = singular;
@@ -371,12 +403,12 @@ function buildViewer(item, garmentSrc, modeledSrc) {
 
     const catField = document.createElement('label');
     catField.className = 'field';
-    catField.innerHTML = '<span>Kategorie</span>';
+    catField.innerHTML = `<span>${t('field.category')}</span>`;
     const sel = document.createElement('select');
-    for (const t of TYPES.slice(1)) {
+    for (const id of TYPE_IDS.slice(1)) {
       const o = document.createElement('option');
-      o.value = t.id; o.textContent = t.label;
-      if (draft.part === t.id) o.selected = true;
+      o.value = id; o.textContent = typeLabel(id);
+      if (draft.part === id) o.selected = true;
       sel.appendChild(o);
     }
     sel.addEventListener('change', (e) => { draft.part = e.target.value; });
@@ -385,21 +417,21 @@ function buildViewer(item, garmentSrc, modeledSrc) {
 
     const colorField = document.createElement('fieldset');
     colorField.className = 'color-field';
-    colorField.innerHTML = '<legend>Farben</legend>';
+    colorField.innerHTML = `<legend>${t('colors.legend')}</legend>`;
     const editor = document.createElement('div');
     editor.className = 'colors-editor';
-    editor.appendChild(colorControl('Primärfarbe', 'primary', false));
-    editor.appendChild(colorControl('Zweitfarbe', 'secondary', true));
+    editor.appendChild(colorControl(t('field.primary'), 'primary', false));
+    editor.appendChild(colorControl(t('field.secondary'), 'secondary', true));
     colorField.appendChild(editor);
     const help = document.createElement('p');
     help.className = 'color-help';
-    help.textContent = sampling ? `Tippe auf das Kleidungsstück, um die ${sampling === 'secondary' ? 'Zweit' : 'Primär'}farbe zu übernehmen.` : 'Farben kommen aus dem Bild. Eine Zweitfarbe wird nur bei deutlichem Unterschied vorgeschlagen.';
+    help.textContent = sampling ? t('field.sampleHint', sampling === 'secondary' ? t('field.secondary') : t('field.primary')) : t('field.colorHelp');
     colorField.appendChild(help);
     wrap.appendChild(colorField);
 
     const detailsField = document.createElement('div');
     detailsField.className = 'field details-field';
-    detailsField.innerHTML = '<span>Details</span>';
+    detailsField.innerHTML = `<span>${t('field.details')}</span>`;
     detailsField.appendChild(buildTagEditor(draft));
     wrap.appendChild(detailsField);
 
@@ -412,19 +444,19 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     const del = document.createElement('button');
     del.className = 'delete-button';
     del.type = 'button';
-    del.innerHTML = icon('trash', 15) + ' Löschen';
+    del.innerHTML = icon('trash', 15) + ' ' + t('btn.delete');
     del.addEventListener('click', () => deleteItem(item.id));
     const spacer = document.createElement('span');
     spacer.className = 'action-spacer';
     const cancel = document.createElement('button');
     cancel.className = 'secondary-button';
     cancel.type = 'button';
-    cancel.textContent = 'Schließen';
+    cancel.textContent = t('btn.close');
     cancel.addEventListener('click', closeViewer);
     const save = document.createElement('button');
     save.className = 'primary-button';
     save.type = 'button';
-    save.innerHTML = icon('check', 15) + ' Speichern';
+    save.innerHTML = icon('check', 15) + ' ' + t('btn.save');
     save.addEventListener('click', () => {
       Object.assign(item, { name: draft.name.trim(), part: draft.part, color: draft.color, secondaryColor: draft.secondaryColor, tags: draft.tags.map((t) => t.trim()).filter(Boolean) });
       store.save('items', state.items);
@@ -458,7 +490,7 @@ function buildTagEditor(draft) {
   const row = document.createElement('div');
   row.className = 'tag-input-row';
   const input = document.createElement('input');
-  input.placeholder = 'Detail hinzufügen';
+  input.placeholder = t('field.addDetail');
   const add = document.createElement('button');
   add.type = 'button';
   add.innerHTML = icon('plus', 15);
@@ -537,21 +569,21 @@ function renderTrayButton() {
   else btn.innerHTML = icon('plus', 19);
 
   const active = jobs[jobs.length - 1];
-  $('#tray-label').textContent = jobs.length ? statusText(active) : 'Kleidung hinzufügen';
+  $('#tray-label').textContent = jobs.length ? statusText(active) : t('tray.add');
   const tray = $('#import-tray');
   tray.classList.toggle('is-expanded', jobs.length > 0);
 }
 
 function statusText(job) {
   switch (job?.stage) {
-    case 'analyzing': return 'Kleidung wird erkannt';
-    case 'crop-review': return 'Zuschnitt prüfen';
-    case 'garment-processing': return 'Freisteller wird erstellt';
-    case 'garment-review': return 'Bereit zur Prüfung';
-    case 'modeled-processing': return 'Model-Foto wird erstellt';
-    case 'modeled-review': return 'Model-Foto prüfen';
-    case 'error': return 'Import braucht Aufmerksamkeit';
-    default: return 'Kleidung hinzufügen';
+    case 'analyzing': return t('status.analyzing');
+    case 'crop-review': return t('status.crop');
+    case 'garment-processing': return t('status.garmentProc');
+    case 'garment-review': return t('status.garmentReview');
+    case 'modeled-processing': return t('status.modeledProc');
+    case 'modeled-review': return t('status.modeledReview');
+    case 'error': return t('status.error');
+    default: return t('tray.add');
   }
 }
 
@@ -589,7 +621,7 @@ async function analyzeAndQueue(dataUrl) {
     const normalized = await ai.normalizeImage(dataUrl, 1280);
     const detected = await ai.openAIAnalyze({ key: state.settings.openaiKey, model: state.settings.visionModel, imageDataUrl: normalized });
     jobs.splice(jobs.indexOf(pending), 1);
-    if (!detected.length) { showImportError('Kein Kleidungsstück im Bild erkannt. Versuche ein klareres, enger gefasstes Foto.'); renderTrayButton(); renderImport(); return; }
+    if (!detected.length) { showImportError(t('err.noClothing')); renderTrayButton(); renderImport(); return; }
     for (const meta of detected) {
       const crop = await ai.cropDetectedItem(normalized, meta.boundingBox);
       jobs.push({ id: uid(), stage: 'crop-review', metadata: meta, original: normalized, cropImage: crop });
@@ -613,7 +645,7 @@ function showImportError(msg) {
 $('#import-link-add').addEventListener('click', async () => {
   const link = $('#import-link').value.trim();
   if (!link) return;
-  if (!state.settings.geminiKey) { showImportError('Für den Link-Import bitte in den Einstellungen einen Gemini-Schlüssel hinterlegen.'); return; }
+  if (!state.settings.geminiKey) { showImportError(t('err.needGemini')); return; }
   $('#import-link-add').disabled = true;
   try {
     const info = await analyzeShopUrl({ apiKey: state.settings.geminiKey, link });
@@ -633,18 +665,20 @@ $('#import-link-add').addEventListener('click', async () => {
     store.save('items', state.items);
     $('#import-link').value = '';
     renderGallery(); renderCategoryNav();
-    showImportError(`„${item.name}“ importiert. Für ein Model-Foto ein Produktbild als Foto importieren.`);
+    showImportError(t('link.imported', item.name));
   } catch (e) { showImportError(e.message); }
   finally { $('#import-link-add').disabled = false; }
 });
 
 async function advanceCrop(job) {
+  if (!canGenerate()) return;
   job.stage = 'garment-processing';
   renderTrayButton(); renderImport();
   try {
     const chromaKey = ai.chooseChromaKey(job.metadata.color);
     const prompt = ai.buildGarmentPrompt(job.metadata, chromaKey) + (job.regenDirection ? `\nUser regeneration direction: ${job.regenDirection}` : '');
     const raw = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [job.cropImage], size: '1024x1024' });
+    bumpUsage();
     job.garmentSource = raw;
     job.chromaKey = chromaKey;
     const result = await ai.processChromaBackground(raw, chromaKey, {});
@@ -687,6 +721,8 @@ async function approveGarment(job) {
   store.save('items', state.items);
   renderGallery(); renderCategoryNav();
   job.itemId = itemId;
+  // Limit erreicht? Teil bleibt im Schrank (Freisteller), Model-Foto entfällt.
+  if (!canGenerate()) { removeJob(job); return; }
   job.stage = 'modeled-processing';
   renderTrayButton(); renderImport();
   // Model-Foto erzeugen
@@ -694,6 +730,7 @@ async function approveGarment(job) {
     const modelRef = await imageStore.get('model-reference');
     const prompt = ai.MODELED_PROMPT + (job.modeledDirection ? `\nUser regeneration direction: ${job.modeledDirection}` : '');
     const modeled = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, job.garmentImage], size: '1024x1536' });
+    bumpUsage();
     job.modeledImage = modeled;
     job.stage = 'modeled-review';
   } catch (e) { job.stage = 'modeled-error'; job.error = e.message; }
@@ -726,14 +763,14 @@ function renderImport() {
   const title = $('#import-title');
   const body = $('#import-body');
   const reviewing = jobs.filter((j) => ['crop-review', 'garment-review', 'modeled-review'].includes(j.stage)).length;
-  title.textContent = reviewing ? `${reviewing} bereit zur Prüfung` : jobs.some((j) => j.stage === 'error') ? 'Import braucht Aufmerksamkeit' : jobs.length ? 'Neue Teile werden vorbereitet' : 'Zum Kleiderschrank hinzufügen';
+  title.textContent = reviewing ? t('import.title.ready', reviewing) : jobs.some((j) => j.stage === 'error') ? t('import.title.attention') : jobs.length ? t('import.title.preparing') : t('import.title.default');
 
   body.innerHTML = '';
   if (!jobs.length) {
-    body.innerHTML = `<div class="import-drop-target">${icon('upload', 28)}<h2>Bild wählen oder einfügen</h2><p>Wir isolieren jedes Kleidungsstück, schlagen Details vor und halten alles zu deiner Prüfung bereit.</p></div>`;
+    body.innerHTML = `<div class="import-drop-target">${icon('upload', 28)}<h2>${t('import.empty.title')}</h2><p>${t('import.empty.sub')}</p></div>`;
     const choose = document.createElement('button');
     choose.className = 'import-button import-button--primary';
-    choose.textContent = 'Bilder wählen';
+    choose.textContent = t('import.choose');
     choose.style.marginTop = '4px';
     choose.addEventListener('click', () => $('#import-input').click());
     body.querySelector('.import-drop-target').appendChild(choose);
@@ -745,7 +782,7 @@ function renderImport() {
   if (jobs.some((j) => j.stage.endsWith('-processing') || j.stage === 'analyzing')) {
     const prog = document.createElement('div');
     prog.className = 'import-progress';
-    prog.innerHTML = `<div class="import-progress__meta"><span>${statusText(jobs[jobs.length - 1])}</span><span>${jobs.length} ${jobs.length === 1 ? 'Teil' : 'Teile'}</span></div><div class="import-progress__track"><div class="import-progress__bar"></div></div>`;
+    prog.innerHTML = `<div class="import-progress__meta"><span>${statusText(jobs[jobs.length - 1])}</span><span>${t('pieces', jobs.length)}</span></div><div class="import-progress__track"><div class="import-progress__bar"></div></div>`;
     body.appendChild(prog);
   }
 
@@ -760,7 +797,7 @@ function renderImport() {
   actions.className = 'import-actions';
   const another = document.createElement('button');
   another.className = 'import-button';
-  another.innerHTML = icon('plus', 14) + ' Weiteres hinzufügen';
+  another.innerHTML = icon('plus', 14) + ' ' + t('import.another');
   another.addEventListener('click', () => $('#import-input').click());
   actions.appendChild(another);
   body.appendChild(actions);
@@ -808,28 +845,28 @@ function buildReviewEditor(job) {
   fields.className = 'import-fields';
   const stageLabel = document.createElement('p');
   stageLabel.className = 'import-editor__stage';
-  stageLabel.textContent = job.stage === 'crop-review' ? 'Erkanntes Teil' : job.stage === 'garment-review' ? 'Freisteller' : 'Model-Foto';
+  stageLabel.textContent = job.stage === 'crop-review' ? t('stage.crop') : job.stage === 'garment-review' ? t('stage.garment') : t('stage.modeled');
   fields.appendChild(stageLabel);
 
   if (job.stage === 'crop-review') {
     const p = document.createElement('p');
     p.className = 'import-card__detail';
-    p.textContent = 'Prüfe, ob der Zuschnitt das gewünschte Teil vollständig zeigt. Mit „Zuschnitt verwenden“ startet der Freisteller.';
+    p.textContent = t('review.cropHint');
     fields.appendChild(p);
   } else if (job.stage === 'garment-review') {
     fields.appendChild(metaField('Name', 'text', job.metadata.name, (v) => { job.metadata.name = v; }));
-    fields.appendChild(metaSelect('Kategorie', job.metadata.part, (v) => { job.metadata.part = v; }));
-    fields.appendChild(metaColor('Primärfarbe', job.metadata.color, (v) => { job.metadata.color = v; }));
-    fields.appendChild(metaField('Zweitfarbe (optional)', 'text', job.metadata.secondaryColor || '', (v) => { job.metadata.secondaryColor = /^#[0-9a-f]{6}$/i.test(v) ? v : null; }, '#hex oder leer'));
-    fields.appendChild(metaField('Details', 'text', (job.metadata.tags || []).join(', '), (v) => { job.metadata.tags = v.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean); }, 'casual, baumwolle, gestreift'));
+    fields.appendChild(metaSelect(t('field.category'), job.metadata.part, (v) => { job.metadata.part = v; }));
+    fields.appendChild(metaColor(t('field.primary'), job.metadata.color, (v) => { job.metadata.color = v; }));
+    fields.appendChild(metaField(t('field.secondaryOpt'), 'text', job.metadata.secondaryColor || '', (v) => { job.metadata.secondaryColor = /^#[0-9a-f]{6}$/i.test(v) ? v : null; }, t('field.secondaryPh')));
+    fields.appendChild(metaField(t('field.details'), 'text', (job.metadata.tags || []).join(', '), (v) => { job.metadata.tags = v.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean); }, t('field.detailsPh')));
     if (job.cleanupContaminated > 1) fields.appendChild(buildCleanupControl(job));
-    fields.appendChild(regenField('Neu-Anweisung (optional)', job.regenDirection || '', (v) => { job.regenDirection = v; }, 'z. B. Reißverschluss erhalten, Etikett entfernen'));
+    fields.appendChild(regenField(t('field.regen'), job.regenDirection || '', (v) => { job.regenDirection = v; }, t('field.regenGarmentPh')));
   } else {
     const p = document.createElement('p');
     p.className = 'import-card__detail';
-    p.textContent = 'Übernimm dieses Model-Foto für dein neues Teil oder generiere es mit einer genaueren Vorgabe neu.';
+    p.textContent = t('review.modeledHint');
     fields.appendChild(p);
-    fields.appendChild(regenField('Neu-Anweisung (optional)', job.modeledDirection || '', (v) => { job.modeledDirection = v; }, 'z. B. abends in der Stadt, ganze Kleidung zeigen'));
+    fields.appendChild(regenField(t('field.regen'), job.modeledDirection || '', (v) => { job.modeledDirection = v; }, t('field.regenModeledPh')));
   }
 
   const actions = document.createElement('div');
@@ -900,7 +937,7 @@ function metaSelect(label, value, onChange) {
   f.className = 'import-field';
   f.innerHTML = `<label>${label}</label>`;
   const sel = document.createElement('select');
-  for (const t of TYPES.slice(1)) { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; if (value === t.id) o.selected = true; sel.appendChild(o); }
+  for (const id of TYPE_IDS.slice(1)) { const o = document.createElement('option'); o.value = id; o.textContent = typeLabel(id); if (value === id) o.selected = true; sel.appendChild(o); }
   sel.addEventListener('change', (e) => onChange(e.target.value));
   f.appendChild(sel);
   return f;
@@ -995,28 +1032,30 @@ $('#btn-look-advise').addEventListener('click', () => {
   const items = selectedLookItems().map((i) => ({ type: ADVISOR_TYPE[i.part] || 'tshirt', color: i.color }));
   const { score, text } = analyzeOutfit(items, { hair: state.rules.favColors?.[0], eyes: '#4a6b8a' }, state.rules);
   const box = $('#look-advice');
-  box.textContent = `Stil-Check ${score}/100 — ${text}`;
+  box.textContent = t('looks.styleCheck', score, text);
   box.classList.remove('hidden');
 });
 
 $('#btn-look-generate').addEventListener('click', async () => {
   const items = selectedLookItems();
-  if (!items.length) { showImportError('Wähle zuerst Teile für den Look aus.'); openImport(); closeImport(); return; }
+  if (!items.length) { notify(t('err.pickItems')); return; }
   if (!requireSetup()) return;
+  if (!canGenerate()) return;
   const btn = $('#btn-look-generate');
-  btn.disabled = true; btn.textContent = 'Look wird generiert …';
+  btn.disabled = true; btn.textContent = t('looks.generating');
   try {
     const modelRef = await imageStore.get('model-reference');
     const garments = [];
     for (const item of items) { const g = await cacheImage(item.imageKey); if (g) garments.push(g); }
     const prompt = ai.buildLookPrompt(garments.length, $('#look-note').value.trim());
     const result = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, ...garments], size: '1024x1536' });
+    bumpUsage();
     lookResult = result;
     const box = $('#look-result');
     box.classList.remove('hidden');
     box.querySelector('img').src = result;
   } catch (e) { showImportError(e.message); }
-  finally { btn.disabled = false; btn.textContent = 'Look generieren'; }
+  finally { btn.disabled = false; btn.textContent = t('looks.generate'); }
 });
 
 $('#btn-look-save').addEventListener('click', async () => {
@@ -1025,7 +1064,7 @@ $('#btn-look-save').addEventListener('click', async () => {
   const imageKey = `look-${id}`;
   await imageStore.put(imageKey, lookResult);
   imageCache.set(imageKey, lookResult);
-  const look = { id, name: $('#look-name').value.trim() || 'Look vom ' + new Date().toLocaleDateString('de-DE'), itemIds: [...lookSelection], imageKey, fav: false, createdAt: Date.now() };
+  const look = { id, name: $('#look-name').value.trim() || t('looks.defaultName'), itemIds: [...lookSelection], imageKey, fav: false, createdAt: Date.now() };
   state.looks.unshift(look);
   store.save('looks', state.looks);
   $('#look-name').value = '';
@@ -1037,6 +1076,11 @@ $('#btn-look-save').addEventListener('click', async () => {
 /* ================= EINSTELLUNGEN ================= */
 
 function openSettings() {
+  $('#set-language').value = getLang();
+  $('#set-theme').value = currentTheme();
+  $('#set-usage').value = state.settings.usageLimit ?? 40;
+  const used = state.usage.day === todayKey() ? state.usage.count : 0;
+  $('#usage-today').textContent = state.settings.usageLimit ? t('usage.today', used, state.settings.usageLimit) : '';
   $('#set-openai').value = state.settings.openaiKey || '';
   $('#set-gemini').value = state.settings.geminiKey || '';
   $('#set-image-model').value = state.settings.imageModel || '';
@@ -1068,11 +1112,14 @@ $('#set-photo').addEventListener('change', async (e) => {
   prev.src = normalized; prev.classList.remove('hidden');
 });
 $('#settings-save').addEventListener('click', () => {
+  const theme = $('#set-theme').value === 'dark' ? 'dark' : 'light';
   state.settings = {
     openaiKey: $('#set-openai').value.trim(),
     geminiKey: $('#set-gemini').value.trim(),
     imageModel: $('#set-image-model').value.trim() || ai.DEFAULTS.imageModel,
     visionModel: $('#set-vision-model').value.trim() || ai.DEFAULTS.visionModel,
+    theme,
+    usageLimit: Math.max(0, Math.min(999, parseInt($('#set-usage').value, 10) || 0)),
   };
   store.save('settings', state.settings);
   state.rules = {
@@ -1081,12 +1128,54 @@ $('#settings-save').addEventListener('click', () => {
     favColors: [$('#fav-c1').value, $('#fav-c2').value, $('#fav-c3').value],
   };
   store.save('rules', state.rules);
+  applyTheme(theme);
+  const wantLang = $('#set-language').value;
+  if (wantLang !== getLang()) { setLang(wantLang); applyLang(); }
   closeSettings();
 });
+
+/* ================= DARSTELLUNG (Theme & Sprache) ================= */
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const meta = $('#theme-color-meta');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#171611' : '#f4f0e8');
+  $('#toggle-theme').innerHTML = icon(theme === 'dark' ? 'sun' : 'moon', 17);
+}
+// Alle sichtbaren Texte neu setzen (statisch + dynamische Ansichten)
+function applyLang() {
+  applyStaticTranslations();
+  $('#toggle-lang').textContent = getLang().toUpperCase();
+  renderCategoryNav();
+  renderGallery();
+  renderTrayButton();
+  if (importOpen) renderImport();
+  if (state.view === 'looks') renderLooks();
+  if (viewerEl) { const item = state.items.find((i) => i.id === state.selectedId); if (item) openViewer(item.id); }
+}
+
+$('#toggle-theme').addEventListener('click', () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  state.settings.theme = next;
+  store.save('settings', state.settings);
+  applyTheme(next);
+});
+$('#toggle-lang').addEventListener('click', () => {
+  setLang(getLang() === 'de' ? 'en' : 'de');
+  state.settings.theme = currentTheme();
+  applyLang();
+});
+$('#set-theme').addEventListener('change', (e) => applyTheme(e.target.value));
 
 /* ================= START ================= */
 
 async function init() {
+  applyStaticTranslations();
+  $('#toggle-lang').textContent = getLang().toUpperCase();
+  applyTheme(state.settings.theme || currentTheme());
   renderTrayButton();
   renderCategoryNav();
   await renderGallery();
