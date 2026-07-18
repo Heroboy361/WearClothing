@@ -73,6 +73,7 @@ export function normalizeMetadata(value = {}) {
     secondaryColor: typeof m.secondaryColor === 'string' && HEX_COLOR.test(m.secondaryColor) ? m.secondaryColor.toLowerCase() : null,
     material: typeof m.material === 'string' && m.material.trim() ? m.material.trim().slice(0, 40) : null,
     pattern: typeof m.pattern === 'string' && m.pattern.trim() ? m.pattern.trim().slice(0, 40) : null,
+    brand: typeof m.brand === 'string' && m.brand.trim() ? m.brand.trim().slice(0, 40) : null,
     tags: Array.isArray(m.tags) ? m.tags.filter((t) => typeof t === 'string').map((t) => t.trim().toLowerCase().slice(0, 40)).filter(Boolean).slice(0, 12) : [],
     boundingBox: normalizeBoundingBox(m.boundingBox),
   };
@@ -201,6 +202,7 @@ const ANALYZE_SCHEMA = {
           secondaryColor: { anyOf: [{ type: 'string', pattern: '^#[0-9A-Fa-f]{6}$' }, { type: 'null' }] },
           material: { type: 'string' },
           pattern: { type: 'string' },
+          brand: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           tags: { type: 'array', items: { type: 'string' }, maxItems: 4 },
           boundingBox: {
             type: 'object', additionalProperties: false,
@@ -213,7 +215,7 @@ const ANALYZE_SCHEMA = {
             required: ['x', 'y', 'width', 'height'],
           },
         },
-        required: ['name', 'part', 'color', 'secondaryColor', 'material', 'pattern', 'tags', 'boundingBox'],
+        required: ['name', 'part', 'color', 'secondaryColor', 'material', 'pattern', 'brand', 'tags', 'boundingBox'],
       },
     },
   },
@@ -227,7 +229,7 @@ export async function openAIAnalyze({ key, model, imageDataUrl }) {
     body: JSON.stringify({
       model: model || DEFAULTS.visionModel,
       input: [{ role: 'user', content: [
-        { type: 'input_text', text: "Identify every distinct wearable clothing item visible in this image. A photo may show one isolated garment or a person wearing several items. Return one record per actual item that should enter a wardrobe. Ignore the person's body and non-wearable background objects. For each item, include a tight bounding box around only that item using integer coordinates normalized to a 1000 by 1000 image: x and y are the top-left corner, followed by width and height. Boxes may overlap when garments overlap, but each box must focus on one distinct item. Use only these category ids: upperbody, wholebody_up, lowerbody, accessories_up, shoes. Suggest a concise specific name in German, primary hex color, optional genuinely distinct secondary hex color, and 1-4 useful lowercase German detail tags. Also look closely at the actual fabric surface (weave, knit, nap, sheen, ribbing) rather than just the color, and fill 'material' with the fabric in German from categories like: Baumwolle, Frottee/Frotteestoff (terry cloth/toweling, looks like a towel), Cord, Denim/Jeansstoff, Leinen, Wolle, Strickware, Fleece, Leder, Kunstleder, Wildleder, Seide, Satin, Samt, Chiffon, Spitze, Neopren, Polyester, Netzstoff/Mesh, Filz (or the closest accurate description if none fit); fill 'pattern' in German from categories like: Uni/Einfarbig, Gestreift, Kariert, Geblümt, Gepunktet, Animal Print, Camouflage, Paisley, Colorblock, Aufdruck/Print, Ombré (or the closest accurate description). Use 'Uni/Einfarbig' as pattern only when the surface is genuinely a single flat color with no texture-based pattern." },
+        { type: 'input_text', text: "Identify every distinct wearable clothing item visible in this image. A photo may show one isolated garment or a person wearing several items. Return one record per actual item that should enter a wardrobe. Ignore the person's body and non-wearable background objects. For each item, include a tight bounding box around only that item using integer coordinates normalized to a 1000 by 1000 image: x and y are the top-left corner, followed by width and height. Boxes may overlap when garments overlap, but each box must focus on one distinct item. Use only these category ids: upperbody, wholebody_up, lowerbody, accessories_up, shoes. Suggest a concise specific name in German, primary hex color, optional genuinely distinct secondary hex color, and 1-4 useful lowercase German detail tags. Also look closely at the actual fabric surface (weave, knit, nap, sheen, ribbing) rather than just the color, and fill 'material' with the fabric in German from categories like: Baumwolle, Frottee/Frotteestoff (terry cloth/toweling, looks like a towel), Cord, Denim/Jeansstoff, Leinen, Wolle, Strickware, Fleece, Leder, Kunstleder, Wildleder, Seide, Satin, Samt, Chiffon, Spitze, Neopren, Polyester, Netzstoff/Mesh, Filz (or the closest accurate description if none fit); fill 'pattern' in German from categories like: Uni/Einfarbig, Gestreift, Kariert, Geblümt, Gepunktet, Animal Print, Camouflage, Paisley, Colorblock, Aufdruck/Print, Ombré (or the closest accurate description). Use 'Uni/Einfarbig' as pattern only when the surface is genuinely a single flat color with no texture-based pattern. If a brand name or logo is clearly legible on a woven label, tag, print, or hardware, set 'brand' to that exact brand name; otherwise set 'brand' to null — never guess an illegible or uncertain brand." },
         { type: 'input_image', image_url: imageDataUrl },
       ] }],
       text: { format: { type: 'json_schema', name: 'wardrobe_items', strict: true, schema: ANALYZE_SCHEMA } },

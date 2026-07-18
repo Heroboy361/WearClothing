@@ -4,6 +4,7 @@ import { icon } from './icons.js';
 import * as ai from './openai.js';
 import { analyzeShopUrl } from './gemini.js';
 import { analyzeOutfit, isNeutral } from './advisor.js';
+import { matchStyles } from './style-knowledge.js';
 import { t, getLang, setLang, applyStaticTranslations } from './i18n.js';
 
 /* ---------- Konstanten ---------- */
@@ -242,7 +243,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) requestClose(); });
 
   const singular = typeSingular(item.part) || t('viewer.newPiece');
-  const draft = { name: item.name || '', part: item.part, color: item.color || '#9a9286', secondaryColor: item.secondaryColor || null, material: item.material || '', pattern: item.pattern || '', tags: [...(item.tags || [])] };
+  const draft = { name: item.name || '', part: item.part, color: item.color || '#9a9286', secondaryColor: item.secondaryColor || null, material: item.material || '', pattern: item.pattern || '', brand: item.brand || '', tags: [...(item.tags || [])] };
   let palette = [...(item.palette || [])];
   let sampling = null;
   let samplingCanvas = null;
@@ -256,8 +257,8 @@ function buildViewer(item, garmentSrc, modeledSrc) {
 
   function isDirty() {
     const norm = (t) => t.map((x) => x.trim()).filter(Boolean);
-    return JSON.stringify({ name: draft.name.trim(), part: draft.part, color: draft.color?.toLowerCase() || null, secondaryColor: draft.secondaryColor?.toLowerCase() || null, material: draft.material.trim(), pattern: draft.pattern.trim(), tags: norm(draft.tags) })
-      !== JSON.stringify({ name: (item.name || '').trim(), part: item.part, color: item.color?.toLowerCase() || null, secondaryColor: item.secondaryColor?.toLowerCase() || null, material: (item.material || '').trim(), pattern: (item.pattern || '').trim(), tags: norm(item.tags || []) });
+    return JSON.stringify({ name: draft.name.trim(), part: draft.part, color: draft.color?.toLowerCase() || null, secondaryColor: draft.secondaryColor?.toLowerCase() || null, material: draft.material.trim(), pattern: draft.pattern.trim(), brand: draft.brand.trim(), tags: norm(draft.tags) })
+      !== JSON.stringify({ name: (item.name || '').trim(), part: item.part, color: item.color?.toLowerCase() || null, secondaryColor: item.secondaryColor?.toLowerCase() || null, material: (item.material || '').trim(), pattern: (item.pattern || '').trim(), brand: (item.brand || '').trim(), tags: norm(item.tags || []) });
   }
   function requestClose() {
     if (isDirty()) { aside.classList.remove('shake'); void aside.offsetWidth; aside.classList.add('shake'); }
@@ -461,11 +462,38 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     patternField.appendChild(patternInput);
     wrap.appendChild(patternField);
 
+    const brandField = document.createElement('label');
+    brandField.className = 'field';
+    brandField.innerHTML = `<span>${t('field.brand')}</span>`;
+    const brandInput = document.createElement('input');
+    brandInput.value = draft.brand;
+    brandInput.placeholder = t('field.brandPh');
+    brandInput.addEventListener('input', (e) => { draft.brand = e.target.value; });
+    brandField.appendChild(brandInput);
+    wrap.appendChild(brandField);
+
     const detailsField = document.createElement('div');
     detailsField.className = 'field details-field';
     detailsField.innerHTML = `<span>${t('field.details')}</span>`;
     detailsField.appendChild(buildTagEditor(draft));
     wrap.appendChild(detailsField);
+
+    const detectedStyles = matchStyles({ name: draft.name, material: draft.material, pattern: draft.pattern, brand: draft.brand, color: draft.color, secondaryColor: draft.secondaryColor, tags: draft.tags });
+    if (detectedStyles.length) {
+      const styleField = document.createElement('div');
+      styleField.className = 'field';
+      styleField.innerHTML = `<span>${t('field.detectedStyle')}</span>`;
+      const chips = document.createElement('div');
+      chips.className = 'look-detail-tags';
+      for (const s of detectedStyles) {
+        const chip = document.createElement('span');
+        chip.className = 'detail-chip';
+        chip.textContent = s.matchedBrand ? `${s.name} · ${s.matchedBrand.name}` : s.name;
+        chips.appendChild(chip);
+      }
+      styleField.appendChild(chips);
+      wrap.appendChild(styleField);
+    }
 
     const notice = document.createElement('p');
     notice.className = 'unsaved-notice hidden';
@@ -488,7 +516,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     function persistDraft() {
       Object.assign(item, {
         name: draft.name.trim(), part: draft.part, color: draft.color, secondaryColor: draft.secondaryColor,
-        material: draft.material.trim() || null, pattern: draft.pattern.trim() || null,
+        material: draft.material.trim() || null, pattern: draft.pattern.trim() || null, brand: draft.brand.trim() || null,
         tags: draft.tags.map((x) => x.trim()).filter(Boolean),
       });
       store.save('items', state.items);
@@ -772,6 +800,7 @@ $('#import-link-add').addEventListener('click', async () => {
       part: info.part || 'upperbody',
       color: info.color || '#c8c8c8',
       secondaryColor: null,
+      brand: info.brand || null,
       tags: [info.colorName, info.size ? 'gr. ' + info.size : null, info.brand].filter(Boolean).map((t) => t.toLowerCase()),
       imageKey: null,
       modeledKey: null,
@@ -860,6 +889,7 @@ async function approveGarment(job) {
     secondaryColor: job.metadata.secondaryColor,
     material: job.metadata.material || null,
     pattern: job.metadata.pattern || null,
+    brand: job.metadata.brand || null,
     tags: job.metadata.tags,
     imageKey,
     modeledKey: null,
@@ -1191,6 +1221,7 @@ function buildReviewEditor(job) {
     fields.appendChild(metaField(t('field.secondaryOpt'), 'text', job.metadata.secondaryColor || '', (v) => { job.metadata.secondaryColor = /^#[0-9a-f]{6}$/i.test(v) ? v : null; }, t('field.secondaryPh')));
     fields.appendChild(metaField(t('field.material'), 'text', job.metadata.material || '', (v) => { job.metadata.material = v.trim() || null; }, t('field.materialPh'), 'material-options'));
     fields.appendChild(metaField(t('field.pattern'), 'text', job.metadata.pattern || '', (v) => { job.metadata.pattern = v.trim() || null; }, t('field.patternPh'), 'pattern-options'));
+    fields.appendChild(metaField(t('field.brand'), 'text', job.metadata.brand || '', (v) => { job.metadata.brand = v.trim() || null; }, t('field.brandPh')));
     fields.appendChild(metaField(t('field.details'), 'text', (job.metadata.tags || []).join(', '), (v) => { job.metadata.tags = v.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean); }, t('field.detailsPh')));
     if (job.cleanupContaminated > 1) fields.appendChild(buildCleanupControl(job));
     fields.appendChild(regenField(t('field.regen'), job.regenDirection || '', (v) => { job.regenDirection = v; }, t('field.regenGarmentPh')));
@@ -1337,13 +1368,21 @@ function buildPieceCollage(imgSrcs) {
 
 // Einfache, regelbasierte Stil-Tags aus der Teile-Zusammensetzung (kostenlos, ohne KI)
 function deriveLookTags(items) {
-  const has = (part) => items.some((i) => i.part === part);
   const tags = [];
-  if (has('wholebody_up')) tags.push('layered');
-  if (has('accessories_up')) tags.push('statement');
-  if (items.every((i) => isNeutral(i.color))) tags.push('minimal');
-  if (has('lowerbody') && items.some((i) => i.part === 'lowerbody' && /short/i.test(i.name || ''))) tags.push('sportlich');
-  if (!tags.includes('minimal') && !tags.includes('statement')) tags.push('streetwear');
+
+  // Stilrichtungen aus der Wissensdatenbank über alle Teile aggregieren (kostenlos,
+  // ohne KI-Aufruf) und die stärksten als benannte Stil-Tags voranstellen.
+  const totals = new Map();
+  for (const item of items) {
+    for (const match of matchStyles(item)) totals.set(match.name, (totals.get(match.name) || 0) + match.score);
+  }
+  for (const [name] of [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2)) tags.push('style:' + name);
+
+  const has = (part) => items.some((i) => i.part === part);
+  if (tags.length < 3 && has('wholebody_up')) tags.push('layered');
+  if (tags.length < 3 && has('accessories_up')) tags.push('statement');
+  if (tags.length < 3 && items.every((i) => isNeutral(i.color))) tags.push('minimal');
+  if (tags.length < 3 && has('lowerbody') && items.some((i) => i.part === 'lowerbody' && /short/i.test(i.name || ''))) tags.push('sportlich');
   if (!tags.length) tags.push('casual');
   return [...new Set(tags)].slice(0, 3);
 }
@@ -1354,7 +1393,12 @@ function deriveLookTags(items) {
 function describeLook(items) {
   const advisorItems = items.map((i) => ({ type: ADVISOR_TYPE[i.part] || 'tshirt', color: i.color }));
   const { score, text } = analyzeOutfit(advisorItems, DEFAULT_PROFILE_FOR_ADVICE, state.rules);
-  return { description: text, score, tags: deriveLookTags(items) };
+  const tags = deriveLookTags(items);
+  // Kleiner Bonus, wenn die Teile erkennbar zu einer benannten Stilrichtung passen
+  // (aus der Wissensdatenbank) – belohnt stilistisch stimmige Kombinationen zusätzlich
+  // zur reinen Farbharmonie.
+  const coherenceBonus = tags.some((tag) => tag.startsWith('style:')) ? 4 : 0;
+  return { description: text, score: Math.min(98, score + coherenceBonus), tags };
 }
 
 const MAX_SUGGESTIONS = 6;
@@ -1494,7 +1538,7 @@ async function openLookDetail(look) {
   for (const tagKey of meta.tags) {
     const chip = document.createElement('span');
     chip.className = 'detail-chip';
-    chip.textContent = t('tag.' + tagKey) || tagKey;
+    chip.textContent = tagKey.startsWith('style:') ? tagKey.slice(6) : t('tag.' + tagKey);
     tagsRow.appendChild(chip);
   }
   body.appendChild(tagsRow);
