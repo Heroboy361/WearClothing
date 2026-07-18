@@ -107,6 +107,10 @@ const STRINGS = {
     'err.pickItems': 'Wähle zuerst Teile für den Look aus.',
     'link.imported': (n) => `„${n}“ importiert. Für ein Model-Foto ein Produktbild als Foto importieren.`,
 
+    'looks.suggestTitle': 'Outfit-Vorschläge',
+    'looks.suggestHint': 'Automatisch aus deinem Kleiderschrank zusammengestellt – kostenlos, ohne KI-Aufruf. Antippen wählt die Teile aus; das eigentliche Foto entsteht erst, wenn du unten auf „Look generieren“ tippst.',
+    'looks.suggestEmpty': 'Noch nicht genug Teile für automatische Vorschläge – importiere mindestens ein Ober- und ein Unterteil.',
+    'looks.suggestPicked': 'Vorschlag ausgewählt – tippe unten auf „Look generieren“, um das Foto zu erzeugen.',
     'looks.newTitle': 'Neuer Look',
     'looks.hint': 'Wähle Teile aus deinem Kleiderschrank – die Bild-KI zieht sie dir auf deinem Referenzfoto als komplettes Outfit an. Der Stilberater bewertet die Auswahl vorab nach deinen Farbregeln.',
     'looks.pickerEmpty': 'Noch keine Teile im Kleiderschrank – importiere zuerst welche.',
@@ -119,6 +123,13 @@ const STRINGS = {
     'looks.empty': 'Noch keine Looks gespeichert.',
     'looks.defaultName': () => 'Look vom ' + new Date().toLocaleDateString('de-DE'),
     'looks.styleCheck': (s, t) => `Stil-Check ${s}/100 — ${t}`,
+
+    'tag.minimal': 'Minimal', 'tag.streetwear': 'Streetwear', 'tag.elegant': 'Elegant',
+    'tag.sportlich': 'Sportlich', 'tag.statement': 'Statement', 'tag.casual': 'Casual', 'tag.layered': 'Layered',
+
+    'look.detail.regen': 'Neu generieren',
+    'look.detail.regenConfirm': 'Das erzeugt ein neues KI-Bild dieses Looks und zählt auf dein Tageslimit. Fortfahren?',
+    'look.detail.wear': 'Diese Teile im Kleiderschrank ansehen',
 
     'settings.title': 'Einstellungen',
     'settings.openaiSection': 'OpenAI (Import & Model-Fotos)',
@@ -266,6 +277,10 @@ const STRINGS = {
     'err.pickItems': 'Select pieces for the look first.',
     'link.imported': (n) => `“${n}” imported. Import a product photo as an image for a modeled shot.`,
 
+    'looks.suggestTitle': 'Outfit suggestions',
+    'looks.suggestHint': 'Automatically put together from your wardrobe — free, no AI call. Tap to select the pieces; the actual photo is only generated once you tap “Generate look” below.',
+    'looks.suggestEmpty': 'Not enough pieces yet for automatic suggestions — import at least one top and one bottom.',
+    'looks.suggestPicked': 'Suggestion selected — tap “Generate look” below to create the photo.',
     'looks.newTitle': 'New look',
     'looks.hint': 'Pick pieces from your wardrobe — the image AI dresses you in the complete outfit on your reference photo. The style advisor rates the selection first against your color rules.',
     'looks.pickerEmpty': 'No pieces yet — import some first.',
@@ -278,6 +293,13 @@ const STRINGS = {
     'looks.empty': 'No looks saved yet.',
     'looks.defaultName': () => 'Look from ' + new Date().toLocaleDateString('en-GB'),
     'looks.styleCheck': (s, t) => `Style check ${s}/100 — ${t}`,
+
+    'tag.minimal': 'Minimal', 'tag.streetwear': 'Streetwear', 'tag.elegant': 'Elegant',
+    'tag.sportlich': 'Sporty', 'tag.statement': 'Statement', 'tag.casual': 'Casual', 'tag.layered': 'Layered',
+
+    'look.detail.regen': 'Regenerate',
+    'look.detail.regenConfirm': 'This creates a new AI image of this look and counts toward your daily limit. Continue?',
+    'look.detail.wear': 'View these pieces in the wardrobe',
 
     'settings.title': 'Settings',
     'settings.openaiSection': 'OpenAI (import & modeled photos)',
