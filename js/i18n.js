@@ -51,7 +51,10 @@ const STRINGS = {
     'stage.garment': 'Freisteller',
     'stage.modeled': 'Model-Foto',
     'review.cropHint': 'Prüfe, ob der Zuschnitt das gewünschte Teil vollständig zeigt. Mit „Zuschnitt verwenden“ startet der Freisteller.',
+    'review.cropDragHint': 'Rahmen ziehen zum Verschieben, an einer Ecke ziehen zum Vergrößern/Verkleinern (Zoomen).',
+    'review.cropResult': 'Ergebnis des Zuschnitts',
     'review.modeledHint': 'Übernimm dieses Model-Foto für dein neues Teil oder generiere es mit einer genaueren Vorgabe neu.',
+    'review.modeledHint.companion': (n) => `Model-Foto kombiniert dieses Teil mit „${n}“ aus deinem Kleiderschrank. Übernimm es oder generiere es mit einer genaueren Vorgabe neu.`,
     'field.name': 'Name',
     'field.category': 'Kategorie',
     'field.primary': 'Primärfarbe',
@@ -95,6 +98,7 @@ const STRINGS = {
     'btn.close': 'Schließen',
     'btn.save': 'Speichern',
     'btn.regenerate': 'Mit KI neu generieren',
+    'btn.reset': 'Zurücksetzen',
 
     'regen.confirm': (n) => `Das erzeugt ${n} neue${n === 1 ? 's' : ''} KI-Bild${n === 1 ? '' : 'er'} (Freisteller${n > 1 ? ' + Model-Foto' : ''}) und zählt entsprechend auf dein Tageslimit. Fortfahren?`,
     'regen.unavailable': 'Für dieses Teil ist keine Neu-Generierung möglich – kein Ausgangsfoto gespeichert (z. B. bei per Link importierten oder älteren Teilen).',
@@ -106,6 +110,7 @@ const STRINGS = {
     'err.needGemini': 'Für den Link-Import bitte in den Einstellungen einen Gemini-Schlüssel hinterlegen.',
     'err.pickItems': 'Wähle zuerst Teile für den Look aus.',
     'link.imported': (n) => `„${n}“ importiert. Für ein Model-Foto ein Produktbild als Foto importieren.`,
+    'link.analyzing': 'Produktseite wird erfasst und live analysiert – Name, Beschreibung, Farbe, Größe …',
 
     'looks.suggestTitle': 'Outfit-Vorschläge',
     'looks.suggestHint': 'Automatisch aus deinem Kleiderschrank zusammengestellt – kostenlos, ohne KI-Aufruf. Antippen wählt die Teile aus; das eigentliche Foto entsteht erst, wenn du unten auf „Look generieren“ tippst.',
@@ -232,7 +237,10 @@ const STRINGS = {
     'stage.garment': 'Garment image',
     'stage.modeled': 'Modeled image',
     'review.cropHint': 'Check that this crop contains the complete intended item. Approving it starts the garment image.',
+    'review.cropDragHint': 'Drag the frame to move it, drag a corner to resize (zoom) it.',
+    'review.cropResult': 'Crop result',
     'review.modeledHint': 'Approve this modeled image to attach it to your new piece, or regenerate it with a more specific direction.',
+    'review.modeledHint.companion': (n) => `This modeled photo pairs the piece with “${n}” from your wardrobe. Approve it or regenerate with a more specific direction.`,
     'field.name': 'Name',
     'field.category': 'Category',
     'field.primary': 'Primary color',
@@ -276,6 +284,7 @@ const STRINGS = {
     'btn.close': 'Close',
     'btn.save': 'Save',
     'btn.regenerate': 'Regenerate with AI',
+    'btn.reset': 'Reset',
 
     'regen.confirm': (n) => `This creates ${n} new AI image${n === 1 ? '' : 's'} (cutout${n > 1 ? ' + modeled photo' : ''}) and counts toward your daily limit accordingly. Continue?`,
     'regen.unavailable': 'Regeneration isn’t available for this piece — no source photo was saved (e.g. items imported via link, or older items).',
@@ -287,6 +296,7 @@ const STRINGS = {
     'err.needGemini': 'For link import, please add a Gemini key in settings.',
     'err.pickItems': 'Select pieces for the look first.',
     'link.imported': (n) => `“${n}” imported. Import a product photo as an image for a modeled shot.`,
+    'link.analyzing': 'Fetching and analyzing the product page live — name, description, color, size …',
 
     'looks.suggestTitle': 'Outfit suggestions',
     'looks.suggestHint': 'Automatically put together from your wardrobe — free, no AI call. Tap to select the pieces; the actual photo is only generated once you tap “Generate look” below.',

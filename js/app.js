@@ -14,6 +14,14 @@ const typeLabel = (id) => t(`type.${id}`);
 const typeSingular = (id) => t(`type.${id}.one`);
 // Abbildung Kategorie -> Stilberater-Typ (für die Farbanalyse)
 const ADVISOR_TYPE = { upperbody: 'tshirt', wholebody_up: 'jacke', lowerbody: 'hose', shoes: 'schuhe', accessories_up: 'kette' };
+// Für welche Kategorien wird beim Model-Foto ein echtes Partner-Teil gesucht
+const COMPANION_PARTS = {
+  upperbody: ['lowerbody'],
+  wholebody_up: ['lowerbody'],
+  lowerbody: ['upperbody', 'wholebody_up'],
+  shoes: ['upperbody', 'lowerbody'],
+  accessories_up: ['upperbody', 'lowerbody'],
+};
 
 const $ = (sel) => document.querySelector(sel);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -628,8 +636,18 @@ async function regenerateItem(item) {
     const modelRef = await imageStore.get('model-reference');
     const isPlainPattern = !item.pattern || /^(uni|einfarbig|solid|plain)/i.test(item.pattern);
     const detail = [item.material ? `${item.material} fabric` : null, !isPlainPattern ? `${item.pattern} pattern` : null].filter(Boolean).join(' and ');
-    const prompt2 = ai.MODELED_PROMPT + (detail ? `\nMake sure the garment's ${detail} is clearly visible and accurately rendered.` : '');
-    const modeled = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt: prompt2, images: [modelRef, result.dataUrl], size: '1024x1536' });
+    const companion = pickCompanion(item);
+    const companionImage = companion ? await cacheImage(companion.imageKey) : null;
+    let prompt2, images2;
+    if (companionImage) {
+      prompt2 = ai.buildFeaturedPairPrompt(item.name || typeSingular(item.part), companion.name || typeSingular(companion.part));
+      images2 = [modelRef, result.dataUrl, companionImage];
+    } else {
+      prompt2 = ai.MODELED_PROMPT;
+      images2 = [modelRef, result.dataUrl];
+    }
+    prompt2 += detail ? `\nMake sure the garment's ${detail} is clearly visible and accurately rendered.` : '';
+    const modeled = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt: prompt2, images: images2, size: '1024x1536' });
     bumpUsage();
     await imageStore.put(item.modeledKey, modeled);
     imageCache.set(item.modeledKey, modeled);
@@ -717,7 +735,7 @@ async function analyzeAndQueue(dataUrl, auto = false) {
     if (!detected.length) { showImportError(t('err.noClothing')); renderTrayButton(); renderImport(); return; }
     for (const meta of detected) {
       const crop = await ai.cropDetectedItem(normalized, meta.boundingBox);
-      const job = { id: uid(), stage: 'crop-review', metadata: meta, original: normalized, cropImage: crop, auto };
+      const job = { id: uid(), stage: 'crop-review', metadata: meta, original: normalized, cropImage: crop, auto, originalBoundingBox: { ...meta.boundingBox } };
       jobs.push(job);
       renderTrayButton(); renderImport();
       if (auto) await advanceCrop(job);
@@ -742,7 +760,10 @@ $('#import-link-add').addEventListener('click', async () => {
   const link = $('#import-link').value.trim();
   if (!link) return;
   if (!state.settings.geminiKey) { showImportError(t('err.needGemini')); return; }
+  const status = $('#import-link-status');
   $('#import-link-add').disabled = true;
+  status.innerHTML = `<span class="import-spinner">${icon('spinner', 14)}</span> ${t('link.analyzing')}`;
+  status.classList.remove('hidden');
   try {
     const info = await analyzeShopUrl({ apiKey: state.settings.geminiKey, link });
     const item = {
@@ -763,7 +784,11 @@ $('#import-link-add').addEventListener('click', async () => {
     renderGallery(); renderCategoryNav();
     showImportError(t('link.imported', item.name));
   } catch (e) { showImportError(e.message); }
-  finally { $('#import-link-add').disabled = false; }
+  finally {
+    $('#import-link-add').disabled = false;
+    status.classList.add('hidden');
+    status.innerHTML = '';
+  }
 });
 
 async function advanceCrop(job) {
@@ -795,6 +820,26 @@ async function recleanup(job, tolerance) {
     job.cleanupContaminated = result.contaminatedPixels;
   } catch (e) { showImportError(e.message); }
   renderImport();
+}
+
+// Sucht das best-passende andere Teil aus dem Kleiderschrank (per Stil-Bewertung,
+// nicht zufällig), damit das Model-Foto ein echtes, plausibles Outfit zeigt statt
+// generischer "neutraler" Begleitkleidung. Liefert null, wenn (noch) nichts passt.
+function pickCompanion(item) {
+  const candidateParts = COMPANION_PARTS[item.part];
+  if (!candidateParts) return null;
+  const candidates = state.items.filter((i) => i.id !== item.id && i.imageKey && candidateParts.includes(i.part));
+  if (!candidates.length) return null;
+  let best = null, bestScore = -1;
+  for (const candidate of candidates) {
+    const pairItems = [
+      { type: ADVISOR_TYPE[item.part] || 'tshirt', color: item.color },
+      { type: ADVISOR_TYPE[candidate.part] || 'tshirt', color: candidate.color },
+    ];
+    const { score } = analyzeOutfit(pairItems, DEFAULT_PROFILE_FOR_ADVICE, state.rules);
+    if (score > bestScore) { bestScore = score; best = candidate; }
+  }
+  return best;
 }
 
 async function approveGarment(job) {
@@ -829,11 +874,24 @@ async function approveGarment(job) {
   if (!canGenerate()) { removeJob(job); return; }
   job.stage = 'modeled-processing';
   renderTrayButton(); renderImport();
-  // Model-Foto erzeugen
+  // Model-Foto erzeugen – mit einem echten, gut passenden Kleiderschrank-Teil
+  // kombinieren statt generischer "neutraler" Begleitkleidung, sobald eins existiert.
   try {
     const modelRef = await imageStore.get('model-reference');
-    const prompt = ai.MODELED_PROMPT + (job.modeledDirection ? `\nUser regeneration direction: ${job.modeledDirection}` : '');
-    const modeled = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, job.garmentImage], size: '1024x1536' });
+    const companion = pickCompanion(item);
+    const companionImage = companion ? await cacheImage(companion.imageKey) : null;
+    let prompt, images;
+    if (companionImage) {
+      prompt = ai.buildFeaturedPairPrompt(item.name || typeSingular(item.part), companion.name || typeSingular(companion.part));
+      images = [modelRef, job.garmentImage, companionImage];
+      job.companionName = companion.name;
+    } else {
+      prompt = ai.MODELED_PROMPT;
+      images = [modelRef, job.garmentImage];
+      job.companionName = null;
+    }
+    prompt += job.modeledDirection ? `\nUser regeneration direction: ${job.modeledDirection}` : '';
+    const modeled = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images, size: '1024x1536' });
     bumpUsage();
     job.modeledImage = modeled;
     job.stage = 'modeled-review';
@@ -954,13 +1012,165 @@ function buildJobCard(job, reviewJob) {
   return card;
 }
 
+// Interaktiver Zuschnitt-Editor: Rahmen per Ziehen verschieben, per Eckgriffen
+// vergrößern/verkleinern. Arbeitet direkt auf der 0-1000-Boundingbox-Skala und
+// ruft zur Vorschau nur die bestehende, kostenlose ai.cropDetectedItem() erneut auf.
+function buildCropEditor(job) {
+  const wrap = document.createElement('div');
+  wrap.className = 'crop-editor';
+
+  const stage = document.createElement('div');
+  stage.className = 'crop-editor__stage';
+  const img = document.createElement('img');
+  img.className = 'crop-editor__image';
+  img.src = job.original;
+  img.alt = '';
+  img.draggable = false;
+  stage.appendChild(img);
+
+  const boxEl = document.createElement('div');
+  boxEl.className = 'crop-editor__box';
+  for (const corner of ['nw', 'ne', 'sw', 'se']) {
+    const handle = document.createElement('span');
+    handle.className = `crop-handle crop-handle--${corner}`;
+    handle.dataset.corner = corner;
+    boxEl.appendChild(handle);
+  }
+  stage.appendChild(boxEl);
+  wrap.appendChild(stage);
+
+  const row = document.createElement('div');
+  row.className = 'crop-editor__row';
+  const hint = document.createElement('p');
+  hint.className = 'crop-editor__hint';
+  hint.textContent = t('review.cropDragHint');
+  row.appendChild(hint);
+
+  const resultBox = document.createElement('div');
+  resultBox.className = 'crop-editor__result';
+  const resultLabel = document.createElement('span');
+  resultLabel.textContent = t('review.cropResult');
+  const resultImg = document.createElement('img');
+  resultImg.src = job.cropImage;
+  resultBox.append(resultLabel, resultImg);
+  row.appendChild(resultBox);
+  wrap.appendChild(row);
+
+  const actions = document.createElement('div');
+  actions.className = 'crop-editor__actions';
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'import-button';
+  reset.innerHTML = icon('retry', 14) + ' ' + t('btn.reset');
+  reset.addEventListener('click', () => {
+    job.metadata.boundingBox = { ...job.originalBoundingBox };
+    updateBoxStyle();
+    scheduleRecrop();
+  });
+  actions.appendChild(reset);
+  wrap.appendChild(actions);
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  function updateBoxStyle() {
+    const b = job.metadata.boundingBox;
+    boxEl.style.left = (b.x / 10) + '%';
+    boxEl.style.top = (b.y / 10) + '%';
+    boxEl.style.width = (b.width / 10) + '%';
+    boxEl.style.height = (b.height / 10) + '%';
+  }
+  updateBoxStyle();
+
+  let recropTimer = null;
+  function scheduleRecrop() {
+    clearTimeout(recropTimer);
+    recropTimer = setTimeout(async () => {
+      try {
+        job.cropImage = await ai.cropDetectedItem(job.original, job.metadata.boundingBox);
+        resultImg.src = job.cropImage;
+      } catch { /* letzte Vorschau beibehalten, falls das Zuschneiden fehlschlägt */ }
+    }, 200);
+  }
+
+  boxEl.addEventListener('pointerdown', (e) => {
+    if (e.target !== boxEl) return;
+    e.preventDefault();
+    const rect = stage.getBoundingClientRect();
+    const startX = e.clientX, startY = e.clientY;
+    const start = { ...job.metadata.boundingBox };
+    boxEl.setPointerCapture(e.pointerId);
+    const onMove = (ev) => {
+      const dx = ((ev.clientX - startX) / rect.width) * 1000;
+      const dy = ((ev.clientY - startY) / rect.height) * 1000;
+      const b = job.metadata.boundingBox;
+      b.x = Math.round(clamp(start.x + dx, 0, 1000 - b.width));
+      b.y = Math.round(clamp(start.y + dy, 0, 1000 - b.height));
+      updateBoxStyle();
+    };
+    const onUp = () => {
+      boxEl.releasePointerCapture(e.pointerId);
+      boxEl.removeEventListener('pointermove', onMove);
+      boxEl.removeEventListener('pointerup', onUp);
+      scheduleRecrop();
+    };
+    boxEl.addEventListener('pointermove', onMove);
+    boxEl.addEventListener('pointerup', onUp);
+  });
+
+  boxEl.querySelectorAll('.crop-handle').forEach((handle) => {
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const corner = handle.dataset.corner;
+      const rect = stage.getBoundingClientRect();
+      const startX = e.clientX, startY = e.clientY;
+      const start = { ...job.metadata.boundingBox };
+      const minSize = 40;
+      handle.setPointerCapture(e.pointerId);
+      const onMove = (ev) => {
+        const dx = ((ev.clientX - startX) / rect.width) * 1000;
+        const dy = ((ev.clientY - startY) / rect.height) * 1000;
+        let { x, y, width, height } = start;
+        if (corner.includes('w')) {
+          const newX = clamp(start.x + dx, 0, start.x + start.width - minSize);
+          width = start.x + start.width - newX;
+          x = newX;
+        }
+        if (corner.includes('e')) width = clamp(start.width + dx, minSize, 1000 - start.x);
+        if (corner.includes('n')) {
+          const newY = clamp(start.y + dy, 0, start.y + start.height - minSize);
+          height = start.y + start.height - newY;
+          y = newY;
+        }
+        if (corner.includes('s')) height = clamp(start.height + dy, minSize, 1000 - start.y);
+        const b = job.metadata.boundingBox;
+        b.x = Math.round(x); b.y = Math.round(y); b.width = Math.round(width); b.height = Math.round(height);
+        updateBoxStyle();
+      };
+      const onUp = () => {
+        handle.releasePointerCapture(e.pointerId);
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        scheduleRecrop();
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+    });
+  });
+
+  return wrap;
+}
+
 function buildReviewEditor(job) {
   const wrap = document.createElement('div');
-  wrap.className = 'import-editor';
-  const preview = document.createElement('img');
-  preview.className = 'import-editor__preview';
-  preview.src = job.stage === 'crop-review' ? job.cropImage : job.stage === 'garment-review' ? job.garmentImage : job.modeledImage;
-  wrap.appendChild(preview);
+  wrap.className = 'import-editor' + (job.stage === 'crop-review' ? ' import-editor--crop' : '');
+  if (job.stage === 'crop-review') {
+    wrap.appendChild(buildCropEditor(job));
+  } else {
+    const preview = document.createElement('img');
+    preview.className = 'import-editor__preview';
+    preview.src = job.stage === 'garment-review' ? job.garmentImage : job.modeledImage;
+    wrap.appendChild(preview);
+  }
 
   const fields = document.createElement('div');
   fields.className = 'import-fields';
@@ -987,7 +1197,7 @@ function buildReviewEditor(job) {
   } else {
     const p = document.createElement('p');
     p.className = 'import-card__detail';
-    p.textContent = t('review.modeledHint');
+    p.textContent = job.companionName ? t('review.modeledHint.companion', job.companionName) : t('review.modeledHint');
     fields.appendChild(p);
     fields.appendChild(regenField(t('field.regen'), job.modeledDirection || '', (v) => { job.modeledDirection = v; }, t('field.regenModeledPh')));
   }
@@ -1017,9 +1227,13 @@ function buildReviewEditor(job) {
   const approve = document.createElement('button');
   approve.className = 'import-button import-button--primary';
   approve.innerHTML = icon('check', 14) + (job.stage === 'crop-review' ? ' Zuschnitt verwenden' : ' Übernehmen');
-  approve.addEventListener('click', () => {
-    if (job.stage === 'crop-review') advanceCrop(job);
-    else if (job.stage === 'garment-review') approveGarment(job);
+  approve.addEventListener('click', async () => {
+    if (job.stage === 'crop-review') {
+      // Letzten manuell angepassten Rahmen sicher übernehmen, unabhängig vom
+      // Debounce der Live-Vorschau im Zuschnitt-Editor.
+      try { job.cropImage = await ai.cropDetectedItem(job.original, job.metadata.boundingBox); } catch { /* letzte Vorschau nutzen */ }
+      advanceCrop(job);
+    } else if (job.stage === 'garment-review') approveGarment(job);
     else approveModeled(job);
   });
   actions.appendChild(approve);
