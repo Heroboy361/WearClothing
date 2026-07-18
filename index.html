@@ -131,6 +131,15 @@
           <button class="import-icon-button" type="button" id="settings-close" data-i18n-aria="settings.close"></button>
         </header>
         <div class="settings-fields">
+          <p class="settings-section" data-i18n="settings.backupSection">Datensicherung</p>
+          <p class="settings-note" data-i18n="settings.backupNote"></p>
+          <p class="settings-note backup-warning" data-i18n="backup.keyWarning"></p>
+          <div class="import-actions backup-actions">
+            <button type="button" class="import-button" id="backup-export"><span id="backup-export-icon"></span> <span data-i18n="settings.backupExport">Sicherung exportieren</span></button>
+            <button type="button" class="import-button" id="backup-import"><span id="backup-import-icon"></span> <span data-i18n="settings.backupImport">Sicherung importieren</span></button>
+            <input type="file" id="backup-import-input" accept="application/json,.json" hidden>
+          </div>
+
           <p class="settings-section" data-i18n="settings.appSection">Darstellung</p>
           <div class="import-field">
             <label data-i18n="settings.language">Sprache</label>

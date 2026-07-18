@@ -1101,6 +1101,9 @@ button { font: inherit; }
 .settings-photo-row img { width: 64px; height: 84px; object-fit: cover; border: 1px solid var(--import-line); border-radius: 8px; background: var(--import-ivory); }
 .settings-note { margin: 0; color: var(--import-muted); font-size: 11px; line-height: 1.5; }
 .settings-note a { color: var(--import-ink); }
+.settings-note.backup-warning { color: var(--accent); }
+.backup-actions { justify-content: flex-start; margin-top: 4px; }
+.backup-actions .import-button { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ---------- Sperrbildschirm ---------- */
 
