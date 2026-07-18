@@ -66,6 +66,7 @@ function canGenerate() {
   }
   return true;
 }
+function hasUsageFor(n) { return usageLeft() >= n; }
 
 // Überall sichtbarer, kurzlebiger Hinweis
 function notify(msg) {
@@ -233,7 +234,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) requestClose(); });
 
   const singular = typeSingular(item.part) || t('viewer.newPiece');
-  const draft = { name: item.name || '', part: item.part, color: item.color || '#9a9286', secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] };
+  const draft = { name: item.name || '', part: item.part, color: item.color || '#9a9286', secondaryColor: item.secondaryColor || null, material: item.material || '', pattern: item.pattern || '', tags: [...(item.tags || [])] };
   let palette = [...(item.palette || [])];
   let sampling = null;
   let samplingCanvas = null;
@@ -247,8 +248,8 @@ function buildViewer(item, garmentSrc, modeledSrc) {
 
   function isDirty() {
     const norm = (t) => t.map((x) => x.trim()).filter(Boolean);
-    return JSON.stringify({ name: draft.name.trim(), part: draft.part, color: draft.color?.toLowerCase() || null, secondaryColor: draft.secondaryColor?.toLowerCase() || null, tags: norm(draft.tags) })
-      !== JSON.stringify({ name: (item.name || '').trim(), part: item.part, color: item.color?.toLowerCase() || null, secondaryColor: item.secondaryColor?.toLowerCase() || null, tags: norm(item.tags || []) });
+    return JSON.stringify({ name: draft.name.trim(), part: draft.part, color: draft.color?.toLowerCase() || null, secondaryColor: draft.secondaryColor?.toLowerCase() || null, material: draft.material.trim(), pattern: draft.pattern.trim(), tags: norm(draft.tags) })
+      !== JSON.stringify({ name: (item.name || '').trim(), part: item.part, color: item.color?.toLowerCase() || null, secondaryColor: item.secondaryColor?.toLowerCase() || null, material: (item.material || '').trim(), pattern: (item.pattern || '').trim(), tags: norm(item.tags || []) });
   }
   function requestClose() {
     if (isDirty()) { aside.classList.remove('shake'); void aside.offsetWidth; aside.classList.add('shake'); }
@@ -430,6 +431,28 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     colorField.appendChild(help);
     wrap.appendChild(colorField);
 
+    const materialField = document.createElement('label');
+    materialField.className = 'field';
+    materialField.innerHTML = `<span>${t('field.material')}</span>`;
+    const materialInput = document.createElement('input');
+    materialInput.value = draft.material;
+    materialInput.placeholder = t('field.materialPh');
+    materialInput.setAttribute('list', 'material-options');
+    materialInput.addEventListener('input', (e) => { draft.material = e.target.value; });
+    materialField.appendChild(materialInput);
+    wrap.appendChild(materialField);
+
+    const patternField = document.createElement('label');
+    patternField.className = 'field';
+    patternField.innerHTML = `<span>${t('field.pattern')}</span>`;
+    const patternInput = document.createElement('input');
+    patternInput.value = draft.pattern;
+    patternInput.placeholder = t('field.patternPh');
+    patternInput.setAttribute('list', 'pattern-options');
+    patternInput.addEventListener('input', (e) => { draft.pattern = e.target.value; });
+    patternField.appendChild(patternInput);
+    wrap.appendChild(patternField);
+
     const detailsField = document.createElement('div');
     detailsField.className = 'field details-field';
     detailsField.innerHTML = `<span>${t('field.details')}</span>`;
@@ -454,18 +477,48 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     cancel.type = 'button';
     cancel.textContent = t('btn.close');
     cancel.addEventListener('click', closeViewer);
+    function persistDraft() {
+      Object.assign(item, {
+        name: draft.name.trim(), part: draft.part, color: draft.color, secondaryColor: draft.secondaryColor,
+        material: draft.material.trim() || null, pattern: draft.pattern.trim() || null,
+        tags: draft.tags.map((x) => x.trim()).filter(Boolean),
+      });
+      store.save('items', state.items);
+      renderGallery();
+      renderCategoryNav();
+    }
     const save = document.createElement('button');
     save.className = 'primary-button';
     save.type = 'button';
     save.innerHTML = icon('check', 15) + ' ' + t('btn.save');
-    save.addEventListener('click', () => {
-      Object.assign(item, { name: draft.name.trim(), part: draft.part, color: draft.color, secondaryColor: draft.secondaryColor, tags: draft.tags.map((t) => t.trim()).filter(Boolean) });
-      store.save('items', state.items);
-      renderGallery();
-      renderCategoryNav();
-      closeViewer();
+    save.addEventListener('click', () => { persistDraft(); closeViewer(); });
+
+    const regen = document.createElement('button');
+    regen.className = 'secondary-button';
+    regen.type = 'button';
+    regen.innerHTML = icon('wand', 15) + ' ' + t('btn.regenerate');
+    regen.addEventListener('click', async () => {
+      if (!item.cropKey) { notify(t('regen.unavailable')); return; }
+      if (!state.settings.openaiKey) { openSettings(); return; }
+      const cost = item.modeledKey ? 2 : 1;
+      if (!hasUsageFor(cost)) { notify(t('err.limit', state.settings.usageLimit)); return; }
+      if (!confirm(t('regen.confirm', cost))) return;
+      persistDraft();
+      const original = regen.innerHTML;
+      regen.disabled = true; save.disabled = true; del.disabled = true;
+      regen.innerHTML = `<span class="import-spinner">${icon('spinner', 15)}</span> ` + t('regen.working');
+      try {
+        await regenerateItem(item);
+        notify(t('regen.done'));
+        openViewer(item.id);
+      } catch (e) {
+        notify(e.message);
+        regen.disabled = false; save.disabled = false; del.disabled = false;
+        regen.innerHTML = original;
+      }
     });
-    actions.append(del, spacer, cancel, save);
+
+    actions.append(del, spacer, cancel, regen, save);
     wrap.appendChild(actions);
     return wrap;
   }
@@ -545,11 +598,45 @@ async function deleteItem(id) {
   if (item) {
     if (item.imageKey) { imageStore.delete(item.imageKey); imageCache.delete(item.imageKey); }
     if (item.modeledKey) { imageStore.delete(item.modeledKey); imageCache.delete(item.modeledKey); }
+    if (item.cropKey) { imageStore.delete(item.cropKey); imageCache.delete(item.cropKey); }
   }
   state.items = state.items.filter((i) => i.id !== id);
   store.save('items', state.items);
   closeViewer();
   renderCategoryNav();
+}
+
+// Generiert Freisteller (und, falls vorhanden, Model-Foto) mit den aktuellen
+// Metadaten (v.a. manuell korrigiertem Material/Muster) aus dem gespeicherten
+// Zuschnitt neu. Wirft bei Fehlern, damit der Aufrufer den Button zurücksetzen kann.
+async function regenerateItem(item) {
+  const cropImage = await imageStore.get(item.cropKey);
+  if (!cropImage) throw new Error(t('regen.unavailable'));
+
+  const chromaKey = ai.chooseChromaKey(item.color);
+  const prompt = ai.buildGarmentPrompt(
+    { name: item.name, part: item.part, color: item.color, secondaryColor: item.secondaryColor, material: item.material, pattern: item.pattern, tags: item.tags },
+    chromaKey,
+  );
+  const raw = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [cropImage], size: '1024x1024' });
+  bumpUsage();
+  const result = await ai.processChromaBackground(raw, chromaKey, {});
+  await imageStore.put(item.imageKey, result.dataUrl);
+  imageCache.set(item.imageKey, result.dataUrl);
+
+  if (item.modeledKey) {
+    const modelRef = await imageStore.get('model-reference');
+    const isPlainPattern = !item.pattern || /^(uni|einfarbig|solid|plain)/i.test(item.pattern);
+    const detail = [item.material ? `${item.material} fabric` : null, !isPlainPattern ? `${item.pattern} pattern` : null].filter(Boolean).join(' and ');
+    const prompt2 = ai.MODELED_PROMPT + (detail ? `\nMake sure the garment's ${detail} is clearly visible and accurately rendered.` : '');
+    const modeled = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt: prompt2, images: [modelRef, result.dataUrl], size: '1024x1536' });
+    bumpUsage();
+    await imageStore.put(item.modeledKey, modeled);
+    imageCache.set(item.modeledKey, modeled);
+  }
+
+  store.save('items', state.items);
+  renderGallery();
 }
 
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -716,15 +803,22 @@ async function approveGarment(job) {
   const imageKey = `garment-${itemId}`;
   await imageStore.put(imageKey, job.garmentImage);
   imageCache.set(imageKey, job.garmentImage);
+  // Zuschnitt aufheben, damit man Material/Muster später korrigieren und neu generieren kann
+  const cropKey = `crop-${itemId}`;
+  await imageStore.put(cropKey, job.cropImage);
+  imageCache.set(cropKey, job.cropImage);
   const item = {
     id: itemId,
     name: job.metadata.name,
     part: job.metadata.part,
     color: job.metadata.color,
     secondaryColor: job.metadata.secondaryColor,
+    material: job.metadata.material || null,
+    pattern: job.metadata.pattern || null,
     tags: job.metadata.tags,
     imageKey,
     modeledKey: null,
+    cropKey,
     palette: [job.metadata.color, job.metadata.secondaryColor].filter(Boolean),
   };
   state.items.unshift(item);
@@ -885,6 +979,8 @@ function buildReviewEditor(job) {
     fields.appendChild(metaSelect(t('field.category'), job.metadata.part, (v) => { job.metadata.part = v; }));
     fields.appendChild(metaColor(t('field.primary'), job.metadata.color, (v) => { job.metadata.color = v; }));
     fields.appendChild(metaField(t('field.secondaryOpt'), 'text', job.metadata.secondaryColor || '', (v) => { job.metadata.secondaryColor = /^#[0-9a-f]{6}$/i.test(v) ? v : null; }, t('field.secondaryPh')));
+    fields.appendChild(metaField(t('field.material'), 'text', job.metadata.material || '', (v) => { job.metadata.material = v.trim() || null; }, t('field.materialPh'), 'material-options'));
+    fields.appendChild(metaField(t('field.pattern'), 'text', job.metadata.pattern || '', (v) => { job.metadata.pattern = v.trim() || null; }, t('field.patternPh'), 'pattern-options'));
     fields.appendChild(metaField(t('field.details'), 'text', (job.metadata.tags || []).join(', '), (v) => { job.metadata.tags = v.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean); }, t('field.detailsPh')));
     if (job.cleanupContaminated > 1) fields.appendChild(buildCleanupControl(job));
     fields.appendChild(regenField(t('field.regen'), job.regenDirection || '', (v) => { job.regenDirection = v; }, t('field.regenGarmentPh')));
@@ -900,7 +996,7 @@ function buildReviewEditor(job) {
   actions.className = 'import-actions';
   const reject = document.createElement('button');
   reject.className = 'import-button';
-  reject.innerHTML = icon('trash', 14) + ' Verwerfen';
+  reject.innerHTML = icon('trash', 14) + ' ' + t('btn.discard');
   reject.addEventListener('click', () => removeJob(job));
   actions.appendChild(reject);
 
@@ -949,12 +1045,13 @@ function buildCleanupControl(job) {
   return wrap;
 }
 
-function metaField(label, type, value, onInput, placeholder) {
+function metaField(label, type, value, onInput, placeholder, listId) {
   const f = document.createElement('div');
   f.className = 'import-field';
   f.innerHTML = `<label>${label}</label>`;
   const input = document.createElement('input');
   input.type = type; input.value = value; if (placeholder) input.placeholder = placeholder;
+  if (listId) input.setAttribute('list', listId);
   input.addEventListener('input', (e) => onInput(e.target.value));
   f.appendChild(input);
   return f;
