@@ -3,7 +3,7 @@ import { imageStore } from './db.js';
 import { icon } from './icons.js';
 import * as ai from './openai.js';
 import { analyzeShopUrl } from './gemini.js';
-import { analyzeOutfit } from './advisor.js';
+import { analyzeOutfit, isNeutral } from './advisor.js';
 import { t, getLang, setLang, applyStaticTranslations } from './i18n.js';
 
 /* ---------- Konstanten ---------- */
@@ -1106,8 +1106,262 @@ window.addEventListener('paste', (e) => { const files = [...(e.clipboardData?.fi
 
 const lookSelection = new Set();
 let lookResult = null;
+const DEFAULT_PROFILE_FOR_ADVICE = { hair: '#3b2a1e', eyes: '#4a6b8a' };
+
+// Überlappende Kleinvorschau mehrerer Teile (Vorschlags-Karten + Hover-Preview)
+function buildPieceCollage(imgSrcs) {
+  const wrap = document.createElement('div');
+  wrap.className = 'piece-collage';
+  imgSrcs.slice(0, 3).forEach((src, i) => {
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.setProperty('--i', i);
+    wrap.appendChild(img);
+  });
+  return wrap;
+}
+
+// Einfache, regelbasierte Stil-Tags aus der Teile-Zusammensetzung (kostenlos, ohne KI)
+function deriveLookTags(items) {
+  const has = (part) => items.some((i) => i.part === part);
+  const tags = [];
+  if (has('wholebody_up')) tags.push('layered');
+  if (has('accessories_up')) tags.push('statement');
+  if (items.every((i) => isNeutral(i.color))) tags.push('minimal');
+  if (has('lowerbody') && items.some((i) => i.part === 'lowerbody' && /short/i.test(i.name || ''))) tags.push('sportlich');
+  if (!tags.includes('minimal') && !tags.includes('statement')) tags.push('streetwear');
+  if (!tags.length) tags.push('casual');
+  return [...new Set(tags)].slice(0, 3);
+}
+
+// Bewertung + Tags aus den aktuellen Teile-Daten – kostenlos (keine KI-Anfrage),
+// dient sowohl als Beschreibungstext für neu gespeicherte Looks als auch als
+// Fallback für ältere Looks, die noch keine gespeicherte Beschreibung haben.
+function describeLook(items) {
+  const advisorItems = items.map((i) => ({ type: ADVISOR_TYPE[i.part] || 'tshirt', color: i.color }));
+  const { score, text } = analyzeOutfit(advisorItems, DEFAULT_PROFILE_FOR_ADVICE, state.rules);
+  return { description: text, score, tags: deriveLookTags(items) };
+}
+
+const MAX_SUGGESTIONS = 6;
+const MAX_SUGGESTION_COMBOS = 3000; // Sicherheitsdeckel für sehr große Kleiderschränke
+
+// Berechnet plausible Outfit-Kombinationen rein lokal (kein KI-Aufruf) und
+// bewertet sie mit dem bestehenden Stilberater, damit ohne jeden Filter schon
+// passende Vorschläge angezeigt werden können.
+function computeSuggestions(maxSuggestions = MAX_SUGGESTIONS) {
+  const tops = state.items.filter((i) => i.part === 'upperbody');
+  const jackets = state.items.filter((i) => i.part === 'wholebody_up');
+  const bottoms = state.items.filter((i) => i.part === 'lowerbody');
+  const shoes = state.items.filter((i) => i.part === 'shoes');
+  if (!tops.length || !bottoms.length) return [];
+
+  let n = 0;
+  const combos = [];
+  outer:
+  for (const top of tops) {
+    for (const bottom of bottoms) {
+      combos.push([top, bottom]);
+      if (jackets.length) combos.push([top, bottom, jackets[n % jackets.length]]);
+      if (shoes.length) combos.push([top, bottom, shoes[n % shoes.length]]);
+      n++;
+      if (combos.length >= MAX_SUGGESTION_COMBOS) break outer;
+    }
+  }
+
+  const seen = new Set();
+  const scored = [];
+  for (const combo of combos) {
+    const key = combo.map((i) => i.id).sort().join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const { description, score } = describeLook(combo);
+    scored.push({ itemIds: combo.map((i) => i.id), items: combo, score, text: description });
+  }
+  scored.sort((a, b) => b.score - a.score);
+
+  // Vielfalt: dieselbe Ober-/Unterteil-Paarung nicht mehrfach unter den Top-Vorschlägen zeigen
+  const picked = [];
+  const usedPairs = new Set();
+  for (const combo of scored) {
+    const pairKey = [combo.itemIds[0], combo.itemIds[1]].sort().join('|');
+    if (usedPairs.has(pairKey)) continue;
+    usedPairs.add(pairKey);
+    picked.push(combo);
+    if (picked.length >= maxSuggestions) break;
+  }
+  for (const combo of scored) {
+    if (picked.length >= maxSuggestions) break;
+    if (!picked.includes(combo)) picked.push(combo);
+  }
+  return picked;
+}
+
+function applySuggestion(suggestion) {
+  lookSelection.clear();
+  suggestion.itemIds.forEach((id) => lookSelection.add(id));
+  renderLooks();
+  const box = $('#look-advice');
+  box.textContent = t('looks.suggestPicked') + ' ' + t('looks.styleCheck', suggestion.score, suggestion.text);
+  box.classList.remove('hidden');
+  $('.looks-composer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function renderSuggestions() {
+  const grid = $('#suggest-grid');
+  const suggestions = computeSuggestions();
+  grid.innerHTML = '';
+  $('#suggest-empty').classList.toggle('hidden', suggestions.length > 0);
+  for (const suggestion of suggestions) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'suggest-card';
+    const preview = document.createElement('div');
+    preview.className = 'suggest-card-preview';
+    const srcs = [];
+    for (const item of suggestion.items) { const s = await cacheImage(item.imageKey); if (s) srcs.push(s); }
+    preview.appendChild(buildPieceCollage(srcs));
+    const body = document.createElement('div');
+    body.className = 'suggest-card-body';
+    body.innerHTML = `<div class="suggest-card-score">${suggestion.score}/100</div><p class="suggest-card-text">${escapeHtml(suggestion.text)}</p>`;
+    card.append(preview, body);
+    card.addEventListener('click', () => applySuggestion(suggestion));
+    grid.appendChild(card);
+  }
+}
+
+let lookDetailEl = null;
+function closeLookDetail() {
+  if (lookDetailEl) { lookDetailEl.remove(); lookDetailEl = null; }
+}
+
+async function openLookDetail(look) {
+  closeLookDetail();
+  const items = look.itemIds.map((id) => state.items.find((i) => i.id === id)).filter(Boolean);
+  const meta = (look.description && look.tags) ? { description: look.description, tags: look.tags } : describeLook(items);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'viewer-overlay';
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeLookDetail(); });
+  const entry = document.createElement('div');
+  entry.className = 'viewer-entry';
+  const photoSrc = look.imageKey ? await cacheImage(look.imageKey) : null;
+  const aside = document.createElement('aside');
+  aside.className = 'viewer' + (photoSrc ? ' has-modeled-image' : '');
+  aside.setAttribute('role', 'dialog');
+  aside.setAttribute('aria-modal', 'true');
+
+  const close = document.createElement('button');
+  close.className = 'viewer-icon-close';
+  close.innerHTML = icon('x', 24);
+  close.addEventListener('click', closeLookDetail);
+  aside.appendChild(close);
+
+  if (photoSrc) {
+    const photo = document.createElement('img');
+    photo.className = 'look-detail-photo';
+    photo.src = photoSrc;
+    photo.alt = look.name;
+    aside.appendChild(photo);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'look-detail-body';
+  const heading = document.createElement('h2');
+  heading.textContent = look.name;
+  body.appendChild(heading);
+  const desc = document.createElement('p');
+  desc.className = 'look-detail-desc';
+  desc.textContent = meta.description;
+  body.appendChild(desc);
+
+  const tagsRow = document.createElement('div');
+  tagsRow.className = 'look-detail-tags';
+  for (const tagKey of meta.tags) {
+    const chip = document.createElement('span');
+    chip.className = 'detail-chip';
+    chip.textContent = t('tag.' + tagKey) || tagKey;
+    tagsRow.appendChild(chip);
+  }
+  body.appendChild(tagsRow);
+
+  const piecesWrap = document.createElement('div');
+  piecesWrap.className = 'look-detail-pieces';
+  piecesWrap.innerHTML = `<p class="look-detail-pieces-label">${t('field.details')}</p>`;
+  for (const item of items) {
+    const chip = document.createElement('span');
+    chip.className = 'detail-chip';
+    chip.innerHTML = `<span class="dot" style="background:${item.color}"></span>${escapeHtml(item.name)}`;
+    piecesWrap.appendChild(chip);
+  }
+  body.appendChild(piecesWrap);
+
+  const actions = document.createElement('div');
+  actions.className = 'viewer-actions';
+  const del = document.createElement('button');
+  del.className = 'delete-button';
+  del.type = 'button';
+  del.innerHTML = icon('trash', 15) + ' ' + t('btn.delete');
+  del.addEventListener('click', () => {
+    if (look.imageKey) { imageStore.delete(look.imageKey); imageCache.delete(look.imageKey); }
+    state.looks = state.looks.filter((l) => l.id !== look.id);
+    store.save('looks', state.looks);
+    closeLookDetail();
+    renderLooks();
+  });
+  const spacer = document.createElement('span');
+  spacer.className = 'action-spacer';
+  const fav = document.createElement('button');
+  fav.className = 'secondary-button';
+  fav.innerHTML = icon(look.fav ? 'starFill' : 'star', 15);
+  fav.addEventListener('click', () => {
+    look.fav = !look.fav;
+    store.save('looks', state.looks);
+    fav.innerHTML = icon(look.fav ? 'starFill' : 'star', 15);
+    renderLooks();
+  });
+  const regen = document.createElement('button');
+  regen.className = 'primary-button';
+  regen.innerHTML = icon('wand', 15) + ' ' + t('look.detail.regen');
+  regen.addEventListener('click', async () => {
+    if (!requireSetup()) return;
+    if (!hasUsageFor(1)) { notify(t('err.limit', state.settings.usageLimit)); return; }
+    if (!confirm(t('look.detail.regenConfirm'))) return;
+    const original = regen.innerHTML;
+    regen.disabled = true; del.disabled = true; fav.disabled = true;
+    regen.innerHTML = `<span class="import-spinner">${icon('spinner', 15)}</span> ` + t('regen.working');
+    try {
+      const modelRef = await imageStore.get('model-reference');
+      const garments = [];
+      for (const item of items) { const g = await cacheImage(item.imageKey); if (g) garments.push(g); }
+      const prompt = ai.buildLookPrompt(garments.length, '');
+      const result = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, ...garments], size: '1024x1536' });
+      bumpUsage();
+      await imageStore.put(look.imageKey, result);
+      imageCache.set(look.imageKey, result);
+      store.save('looks', state.looks);
+      renderLooks();
+      notify(t('regen.done'));
+      openLookDetail(look);
+    } catch (e) {
+      notify(e.message);
+      regen.disabled = false; del.disabled = false; fav.disabled = false;
+      regen.innerHTML = original;
+    }
+  });
+  actions.append(del, spacer, fav, regen);
+  body.appendChild(actions);
+  aside.appendChild(body);
+
+  entry.appendChild(aside);
+  overlay.appendChild(entry);
+  document.body.appendChild(overlay);
+  lookDetailEl = overlay;
+}
 
 async function renderLooks() {
+  await renderSuggestions();
+
   const picker = $('#look-picker');
   picker.innerHTML = '';
   for (const item of state.items) {
@@ -1128,8 +1382,23 @@ async function renderLooks() {
   for (const look of sorted) {
     const card = document.createElement('div');
     card.className = 'look-card';
+    card.tabIndex = 0;
+    card.addEventListener('click', () => openLookDetail(look));
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLookDetail(look); } });
+
+    const media = document.createElement('div');
+    media.className = 'look-card-media';
     const src = look.imageKey ? await cacheImage(look.imageKey) : null;
-    if (src) { const img = document.createElement('img'); img.src = src; img.alt = look.name; card.appendChild(img); }
+    if (src) { const img = document.createElement('img'); img.src = src; img.alt = look.name; media.appendChild(img); }
+    const piecesOverlay = document.createElement('div');
+    piecesOverlay.className = 'look-card-pieces';
+    const pieceItems = look.itemIds.map((id) => state.items.find((i) => i.id === id)).filter(Boolean);
+    const pieceSrcs = [];
+    for (const item of pieceItems) { const s = await cacheImage(item.imageKey); if (s) pieceSrcs.push(s); }
+    piecesOverlay.appendChild(buildPieceCollage(pieceSrcs));
+    media.appendChild(piecesOverlay);
+    card.appendChild(media);
+
     const bodyEl = document.createElement('div');
     bodyEl.className = 'look-card-body';
     const name = document.createElement('span');
@@ -1137,10 +1406,16 @@ async function renderLooks() {
     const fav = document.createElement('button');
     fav.className = look.fav ? 'fav' : '';
     fav.innerHTML = icon(look.fav ? 'starFill' : 'star', 17);
-    fav.addEventListener('click', () => { look.fav = !look.fav; store.save('looks', state.looks); renderLooks(); });
+    fav.addEventListener('click', (e) => { e.stopPropagation(); look.fav = !look.fav; store.save('looks', state.looks); renderLooks(); });
     const del = document.createElement('button');
     del.innerHTML = icon('trash', 16);
-    del.addEventListener('click', () => { if (look.imageKey) { imageStore.delete(look.imageKey); imageCache.delete(look.imageKey); } state.looks = state.looks.filter((l) => l.id !== look.id); store.save('looks', state.looks); renderLooks(); });
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (look.imageKey) { imageStore.delete(look.imageKey); imageCache.delete(look.imageKey); }
+      state.looks = state.looks.filter((l) => l.id !== look.id);
+      store.save('looks', state.looks);
+      renderLooks();
+    });
     bodyEl.append(name, fav, del);
     card.appendChild(bodyEl);
     grid.appendChild(card);
@@ -1154,7 +1429,7 @@ function selectedLookItems() {
 
 $('#btn-look-advise').addEventListener('click', () => {
   const items = selectedLookItems().map((i) => ({ type: ADVISOR_TYPE[i.part] || 'tshirt', color: i.color }));
-  const { score, text } = analyzeOutfit(items, { hair: state.rules.favColors?.[0], eyes: '#4a6b8a' }, state.rules);
+  const { score, text } = analyzeOutfit(items, DEFAULT_PROFILE_FOR_ADVICE, state.rules);
   const box = $('#look-advice');
   box.textContent = t('looks.styleCheck', score, text);
   box.classList.remove('hidden');
@@ -1188,7 +1463,9 @@ $('#btn-look-save').addEventListener('click', async () => {
   const imageKey = `look-${id}`;
   await imageStore.put(imageKey, lookResult);
   imageCache.set(imageKey, lookResult);
-  const look = { id, name: $('#look-name').value.trim() || t('looks.defaultName'), itemIds: [...lookSelection], imageKey, fav: false, createdAt: Date.now() };
+  const items = selectedLookItems();
+  const { description, tags } = describeLook(items);
+  const look = { id, name: $('#look-name').value.trim() || t('looks.defaultName'), itemIds: [...lookSelection], imageKey, description, tags, fav: false, createdAt: Date.now() };
   state.looks.unshift(look);
   store.save('looks', state.looks);
   $('#look-name').value = '';
