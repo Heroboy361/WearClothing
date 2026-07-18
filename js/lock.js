@@ -12,15 +12,24 @@
 
   if (localStorage.getItem(KEY) === PASS_HASH) return; // Gerät ist bereits freigeschaltet
 
+  // Sprache erkennen (Modul-i18n ist hier noch nicht geladen)
+  let lang = 'de';
+  try { const s = JSON.parse(localStorage.getItem('wearclothing.lang')); if (s === 'de' || s === 'en') lang = s; else if ((navigator.language || '').toLowerCase().startsWith('en')) lang = 'en'; }
+  catch { if ((navigator.language || '').toLowerCase().startsWith('en')) lang = 'en'; }
+  const L = {
+    de: { prompt: 'Diese App ist privat. Bitte Passwort eingeben:', ph: 'Passwort', unlock: 'Entsperren', wrong: 'Falsches Passwort.', https: 'Entsperren braucht HTTPS (oder localhost).' },
+    en: { prompt: 'This app is private. Please enter the password:', ph: 'Password', unlock: 'Unlock', wrong: 'Wrong password.', https: 'Unlocking needs HTTPS (or localhost).' },
+  }[lang];
+
   const overlay = document.createElement('div');
   overlay.id = 'lock-overlay';
   overlay.innerHTML = `
     <div class="lock-card">
       <div class="lock-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg></div>
       <h1>WearClothing</h1>
-      <p>Diese App ist privat. Bitte Passwort eingeben:</p>
-      <input type="password" id="lock-pw" autocomplete="current-password" placeholder="Passwort" inputmode="text">
-      <button id="lock-btn">Entsperren</button>
+      <p>${L.prompt}</p>
+      <input type="password" id="lock-pw" autocomplete="current-password" placeholder="${L.ph}" inputmode="text">
+      <button id="lock-btn">${L.unlock}</button>
       <p id="lock-err" class="lock-err"></p>
     </div>`;
 
@@ -36,7 +45,7 @@
     try {
       h = await hash(input.value);
     } catch {
-      err.textContent = 'Entsperren braucht HTTPS (oder localhost).';
+      err.textContent = L.https;
       return;
     }
     if (h === PASS_HASH) {
@@ -44,7 +53,7 @@
       overlay.remove();
       document.documentElement.classList.remove('locked');
     } else {
-      err.textContent = 'Falsches Passwort.';
+      err.textContent = L.wrong;
       input.value = '';
       input.focus();
     }

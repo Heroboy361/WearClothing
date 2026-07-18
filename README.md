@@ -15,9 +15,15 @@ Eine mobile Web-App (PWA) für iPhone, iPad und Desktop im Stil von [tandpfun/wa
 ## Funktionen gegenüber dem Original
 
 - Läuft **komplett im Browser** (das Original nutzt einen lokalen Node-Server) – dadurch als PWA auf iOS/iPad installierbar.
+- **Dark Mode** (Hell/Dunkel, umschaltbar im Header oder in den Einstellungen; folgt anfangs dem System).
+- **Deutsch & Englisch**, umschaltbar per DE/EN-Button im Header.
+- **OpenAI-Nutzungslimit**: max. KI-Bilder pro Tag einstellbar (Standard 40); jede Freisteller-, Model- oder Look-Generierung zählt, bei Erreichen pausiert die App bis zum nächsten Tag.
+- **Mehrfach-Foto-Import** direkt aus der Galerie: mehrere Fotos auf einmal auswählen (die OS-Foto-Berechtigung wird über den nativen Auswahldialog abgefragt); jedes Foto wird automatisch nach Kleidungsstücken analysiert.
 - **Passwort-Sperrbildschirm** schützt die App.
 - **Shop-Link-Import** (optional, per Gemini): Produktseite auslesen und Teil mit Name, Farbe, Größe und Marke anlegen.
 - **Stilberater** mit Farbregeln (3-Farben-Regel, Ton-in-Ton, neutrale Basis, Metall-Abstimmung, Lieblingsfarben).
+
+> Standard-Modelle: `gpt-image-1` (Bilder) und `gpt-4o` (Analyse) – beide real bei OpenAI verfügbar. In den Einstellungen änderbar.
 
 ## Einrichtung (einmalig)
 
