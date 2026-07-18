@@ -91,6 +91,7 @@ async function cacheImage(key) {
 $('#nav-settings').innerHTML = icon('gear', 18);
 $('#drop-icon').innerHTML = icon('upload', 34);
 $('#tray-upload').innerHTML = icon('upload', 17);
+$('#tray-auto').innerHTML = icon('wand', 16);
 $('#import-close').innerHTML = icon('x', 20);
 $('#settings-close').innerHTML = icon('x', 20);
 
@@ -587,10 +588,12 @@ function statusText(job) {
   }
 }
 
-$('#tray-button').addEventListener('click', () => { if (jobs.length) openImport(); else $('#import-input').click(); });
+$('#tray-button').addEventListener('click', () => openImport());
 $('#tray-upload').addEventListener('click', () => $('#import-input').click());
+$('#tray-auto').addEventListener('click', () => $('#import-input-auto').click());
 $('#import-close').addEventListener('click', closeImport);
 $('#import-input').addEventListener('change', (e) => { submitFiles(e.target.files); e.target.value = ''; });
+$('#import-input-auto').addEventListener('change', (e) => { submitFiles(e.target.files, { auto: true }); e.target.value = ''; });
 $('#import-backdrop').addEventListener('mousedown', (e) => { if (e.target === $('#import-backdrop')) closeImport(); });
 
 function openImport() { importOpen = true; $('#import-backdrop').dataset.open = 'true'; renderImport(); }
@@ -602,18 +605,21 @@ function requireSetup() {
   return true;
 }
 
-async function submitFiles(files) {
+async function submitFiles(files, opts = {}) {
+  const auto = !!opts.auto;
   const images = [...files].filter((f) => f.type.startsWith('image/'));
   if (!images.length) return;
   if (!requireSetup()) return;
   openImport();
   for (const file of images) {
     const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
-    await analyzeAndQueue(dataUrl);
+    await analyzeAndQueue(dataUrl, auto);
   }
 }
 
-async function analyzeAndQueue(dataUrl) {
+// auto=true: jedes erkannte Teil durchläuft Zuschnitt→Freisteller→Model-Foto automatisch
+// (siehe Auto-Verkettung am Ende von advanceCrop/approveGarment), ohne Einzel-Bestätigung.
+async function analyzeAndQueue(dataUrl, auto = false) {
   const pending = { id: uid(), stage: 'analyzing' };
   jobs.push(pending);
   renderTrayButton(); renderImport();
@@ -624,7 +630,10 @@ async function analyzeAndQueue(dataUrl) {
     if (!detected.length) { showImportError(t('err.noClothing')); renderTrayButton(); renderImport(); return; }
     for (const meta of detected) {
       const crop = await ai.cropDetectedItem(normalized, meta.boundingBox);
-      jobs.push({ id: uid(), stage: 'crop-review', metadata: meta, original: normalized, cropImage: crop });
+      const job = { id: uid(), stage: 'crop-review', metadata: meta, original: normalized, cropImage: crop, auto };
+      jobs.push(job);
+      renderTrayButton(); renderImport();
+      if (auto) await advanceCrop(job);
     }
   } catch (e) {
     jobs.splice(jobs.indexOf(pending), 1);
@@ -688,6 +697,7 @@ async function advanceCrop(job) {
     job.stage = 'garment-review';
   } catch (e) { job.stage = 'error'; job.error = e.message; }
   renderTrayButton(); renderImport();
+  if (job.auto && job.stage === 'garment-review') await approveGarment(job);
 }
 
 async function recleanup(job, tolerance) {
@@ -735,6 +745,7 @@ async function approveGarment(job) {
     job.stage = 'modeled-review';
   } catch (e) { job.stage = 'modeled-error'; job.error = e.message; }
   renderTrayButton(); renderImport();
+  if (job.auto && job.stage === 'modeled-review') await approveModeled(job);
 }
 
 async function approveModeled(job) {
@@ -768,12 +779,23 @@ function renderImport() {
   body.innerHTML = '';
   if (!jobs.length) {
     body.innerHTML = `<div class="import-drop-target">${icon('upload', 28)}<h2>${t('import.empty.title')}</h2><p>${t('import.empty.sub')}</p></div>`;
+    const target = body.querySelector('.import-drop-target');
+    const btnRow = document.createElement('div');
+    btnRow.className = 'import-empty-actions';
     const choose = document.createElement('button');
     choose.className = 'import-button import-button--primary';
     choose.textContent = t('import.choose');
-    choose.style.marginTop = '4px';
     choose.addEventListener('click', () => $('#import-input').click());
-    body.querySelector('.import-drop-target').appendChild(choose);
+    const auto = document.createElement('button');
+    auto.className = 'import-button';
+    auto.innerHTML = icon('wand', 14) + ' ' + t('import.auto');
+    auto.addEventListener('click', () => $('#import-input-auto').click());
+    btnRow.append(choose, auto);
+    target.appendChild(btnRow);
+    const hint = document.createElement('p');
+    hint.className = 'import-auto-hint';
+    hint.textContent = t('import.auto.hint');
+    target.appendChild(hint);
     return;
   }
 
@@ -800,6 +822,11 @@ function renderImport() {
   another.innerHTML = icon('plus', 14) + ' ' + t('import.another');
   another.addEventListener('click', () => $('#import-input').click());
   actions.appendChild(another);
+  const anotherAuto = document.createElement('button');
+  anotherAuto.className = 'import-button';
+  anotherAuto.innerHTML = icon('wand', 14) + ' ' + t('import.auto');
+  anotherAuto.addEventListener('click', () => $('#import-input-auto').click());
+  actions.appendChild(anotherAuto);
   body.appendChild(actions);
 }
 

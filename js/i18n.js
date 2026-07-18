@@ -22,6 +22,7 @@ const STRINGS = {
 
     'tray.add': 'Kleidung hinzufügen',
     'tray.upload': 'Fotos auswählen',
+    'tray.auto': 'Automatisch importieren',
 
     'import.eyebrow': 'Kleiderschrank-Import',
     'import.title.default': 'Zum Kleiderschrank hinzufügen',
@@ -31,6 +32,8 @@ const STRINGS = {
     'import.empty.title': 'Fotos wählen oder einfügen',
     'import.empty.sub': 'Du kannst mehrere Fotos auf einmal aus deiner Galerie wählen. Wir isolieren jedes Kleidungsstück, schlagen Details vor und halten alles zu deiner Prüfung bereit.',
     'import.choose': 'Fotos wählen',
+    'import.auto': 'Automatisch importieren',
+    'import.auto.hint': 'Wähle mehrere Fotos aus deiner Galerie – jedes erkannte Kleidungsstück wird automatisch freigestellt, mit deinem Referenzfoto fotografiert und ohne weitere Bestätigung in den Kleiderschrank aufgenommen. Fehlerhafte Teile bleiben zur Prüfung stehen. Ein Web-Browser darf deine Galerie aus Datenschutzgründen nie selbst durchsuchen – die Fotoauswahl bleibt bei dir.',
     'import.another': 'Weiteres hinzufügen',
     'import.link.ph': 'Oder Shop-Link einfügen …',
     'import.link.add': 'Link importieren',
@@ -168,6 +171,7 @@ const STRINGS = {
 
     'tray.add': 'Add clothing',
     'tray.upload': 'Choose photos',
+    'tray.auto': 'Auto-import',
 
     'import.eyebrow': 'Wardrobe import',
     'import.title.default': 'Add to your wardrobe',
@@ -177,6 +181,8 @@ const STRINGS = {
     'import.empty.title': 'Choose or paste photos',
     'import.empty.sub': 'You can pick several photos from your gallery at once. We isolate each garment, suggest its details, and hold everything for your review.',
     'import.choose': 'Choose photos',
+    'import.auto': 'Auto-import',
+    'import.auto.hint': 'Pick several photos from your gallery — every detected garment gets automatically cut out, photographed on your reference photo, and added to your wardrobe without further confirmation. Items that fail stay in the queue for review. A web browser can never scan your gallery on its own for privacy reasons — you always choose the photos yourself.',
     'import.another': 'Add another',
     'import.link.ph': 'Or paste a shop link …',
     'import.link.add': 'Import link',
