@@ -61,3 +61,31 @@ Seite in **Safari** öffnen → **Teilen → „Zum Home-Bildschirm hinzufügen�
 ## Deployment
 
 Jeder Merge nach `main` veröffentlicht die App über `.github/workflows/pages.yml` automatisch auf den `gh-pages`-Branch, den GitHub Pages ausliefert.
+
+## Persönlicher Shop: Anprobe vor dem Kauf
+
+Die Startseite zeigt alle Teile mit der vorhandenen Anprobe als Titelbild. Auf dem Desktop wechselt Hover zum Produktfoto; auf dem Handy und per Tastatur gibt es den Schalter **An mir / Produkt**. Beim Hover werden nur bereits gespeicherte Bilder angezeigt, keine neuen KI-Aufrufe gestartet. Ohne Anprobe bleibt das Produktfoto sichtbar und der Status wird benannt.
+
+- **Entdecken** zeigt alle Teile. **Mein Kleiderschrank** enthält deinen Besitz; **Wunschliste** enthält Kaufideen. Bestehende Datensätze ohne Sammlungsfeld zählen weiterhin zum Besitz.
+- Favoriten sind eine zusätzliche Markierung, unabhängig von Besitz oder Wunschliste. Suche berücksichtigt Name, Marke, Größe, Material, Muster und Tags.
+- Die Produktansicht bietet Einzelanprobe, Bildvergleich, Kombination mit anderen Teilen, Original-Shop-Link und „Gekauft · in meinen Schrank“.
+- Beim Fotoimport kannst du Sammlung und automatische Anprobe auswählen. Ohne Referenzfoto wird das Teil trotzdem gespeichert. Eine Einzelanprobe lässt sich später über „An mir ansehen“ erzeugen.
+- Shop-Links lassen sich ohne Gemini-Schlüssel vormerken; mit hinterlegtem Schlüssel werden Metadaten ergänzt. Ein Produktfoto oder Screenshot kann direkt am Eintrag ergänzt werden. Die App verspricht keine automatische Bildübernahme von Shops, die Browserzugriff blockieren.
+- Ein ersetztes Produktfoto entfernt die alte Anprobe, damit die Vorschau nicht das falsche Teil zeigt.
+- Exporte enthalten keine API-Schlüssel mehr. Beim Wiederherstellen bleiben die Schlüssel auf dem aktuellen Gerät erhalten; auch Schlüssel aus älteren Backups werden nicht übernommen.
+
+KI-Anproben sind visuelle Vorschauen. Sie messen keine Passform und garantieren weder Größenpassung noch identische Darstellung von Material, Logo oder Schnitt. Fotos und gespeicherte Anproben bleiben lokal; bestehende KI-Aufrufe nutzen weiter die API-Einstellungen der App. Laufende Generierungen brauchen einen geöffneten Tab und eine Internetverbindung.
+
+### Später zu Cloudflare
+
+Dieser Stand bleibt eine statische PWA ohne Build-Abhängigkeiten. `js/shop.js` enthält die Produktdarstellung, `js/catalog.js` die Sammlungs-/Filterregeln; API-Provider bleiben in `js/openai.js` und `js/gemini.js` gekapselt.
+
+`node scripts/package-static.mjs` erstellt ausschließlich öffentliche App-Dateien in `dist/`. Die vorbereitete `cloudflare/wrangler.jsonc` kann diesen Ordner später als [Worker Static Assets](https://developers.cloudflare.com/workers/static-assets/binding/) ausliefern. **In diesem Schritt wird nichts auf Cloudflare angelegt oder veröffentlicht.**
+
+Vor einem Hostingwechsel die bestehende Sicherung exportieren und auf der neuen Adresse importieren: Browserdaten sind an die jeweilige Origin gebunden und wandern nicht automatisch mit. Nach dem Import API-Schlüssel auf dem neuen Gerät/in der neuen Origin erneut eintragen.
+
+Für eine spätere serverseitige KI-Anbindung: authentifizierte Worker-Endpunkte vor die Provider setzen, API-Schlüssel als Worker Secrets verwalten und serverseitige Nutzungsbegrenzung einführen. Die vorbereitete Static-Assets-Konfiguration alleine liefert noch keinen KI-Proxy, keine Konten und keine Gerätesynchronisierung. Hintergrundaufträge sowie optionale Bildsynchronisierung sind ein gesonderter Ausbau.
+
+### Prüfung
+
+`node --test tests/catalog.test.mjs` prüft Sammlungen, Suche, Sortierung, sichere Shop-Links und den schlüsselfreien Export. `node scripts/package-static.mjs` prüft und paketiert die statischen Assets. `node scripts/check-static.mjs` prüft JavaScript-Syntax, Modulimporte, eindeutige HTML-IDs und lokale Assets.

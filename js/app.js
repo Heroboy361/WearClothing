@@ -1,6 +1,8 @@
 // WearClothing – Kleiderschrank-App (Port von tandpfun/wardrobe, komplett clientseitig).
 import { imageStore } from './db.js';
 import { icon } from './icons.js';
+import { catalogItems, collectionOf, safeShopUrl, withoutSecrets } from './catalog.js';
+import { productCard, productDetail, shopText as tr } from './shop.js';
 import * as ai from './openai.js';
 import { analyzeShopUrl } from './gemini.js';
 import { analyzeOutfit, isNeutral } from './advisor.js';
@@ -35,6 +37,8 @@ const state = {
   rules: store.load('rules', { max3: true, mono: false, neutral: false, accent: true, metal: true, favColors: ['#1f2937', '#e5e0d8', '#7a2e2e'] }),
   usage: store.load('usage', { day: '', count: 0 }),
   activeType: 'all',
+  query: '', sort: 'newest', favorites: false,
+  previewMode: store.load('previewMode', 'modeled'),
   view: 'wardrobe',
   selectedId: null,
   hasModelReference: false,
@@ -45,12 +49,13 @@ if (['gpt-5.4-mini', ''].includes(state.settings.visionModel)) state.settings.vi
 if (typeof state.settings.usageLimit !== 'number') state.settings.usageLimit = 40;
 
 /* ---------- OpenAI-Nutzungslimit (Bild-Generierungen pro Tag) ---------- */
+let pendingImages = 0;
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 function usageLeft() {
   const limit = state.settings.usageLimit || 0;
   if (!limit) return Infinity;
-  if (state.usage.day !== todayKey()) return limit;
-  return Math.max(0, limit - state.usage.count);
+  if (state.usage.day !== todayKey()) return Math.max(0, limit - pendingImages);
+  return Math.max(0, limit - state.usage.count - pendingImages);
 }
 function bumpUsage(n = 1) {
   const today = todayKey();
@@ -68,11 +73,22 @@ function canGenerate() {
 }
 function hasUsageFor(n) { return usageLeft() >= n; }
 
+async function generateImage(options) {
+  if (usageLeft() <= 0) throw new Error(t('err.limit', state.settings.usageLimit));
+  pendingImages++;
+  try {
+    const result = await ai.openAIEdit(options);
+    bumpUsage();
+    return result;
+  } finally { pendingImages--; }
+}
+
 // Überall sichtbarer, kurzlebiger Hinweis
 function notify(msg) {
   const el = document.createElement('div');
   el.className = 'app-toast';
   el.textContent = msg;
+  el.setAttribute('role', 'status');
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 4000);
 }
@@ -100,97 +116,190 @@ $('#settings-close').innerHTML = icon('x', 20);
 
 function setView(view) {
   state.view = view;
-  $('#gallery-grid').classList.toggle('hidden', view !== 'wardrobe');
-  $('#category-nav').classList.toggle('hidden', view !== 'wardrobe');
-  $('#looks-pane').classList.toggle('hidden', view !== 'looks');
-  $('#nav-wardrobe').classList.toggle('active', view === 'wardrobe');
-  $('#nav-looks').classList.toggle('active', view === 'looks');
+  const isLooks = view === 'looks';
+  $('#gallery-grid').classList.toggle('hidden', isLooks);
+  $('#category-nav').classList.toggle('hidden', isLooks);
+  $('#shop-toolbar').classList.toggle('hidden', isLooks);
+  $('.shop-result-meta').classList.toggle('hidden', isLooks);
+  $('#looks-pane').classList.toggle('hidden', !isLooks);
+  $('#nav-wardrobe').classList.toggle('active', view === 'owned');
+  $('#nav-wishlist').classList.toggle('active', view === 'wishlist');
+  $('#nav-looks').classList.toggle('active', isLooks);
+  document.querySelectorAll('[data-shop-view]').forEach(btn => {
+    const active = btn.dataset.shopView === view;
+    btn.classList.toggle('active', active);
+    if (active) btn.setAttribute('aria-current', 'page'); else btn.removeAttribute('aria-current');
+  });
+  updateShopText();
+  if (isLooks) renderLooks(); else renderGallery();
   updateEmptyStates();
-  if (view === 'looks') renderLooks();
 }
-$('#nav-wardrobe').addEventListener('click', () => setView('wardrobe'));
+$('#nav-wardrobe').addEventListener('click', () => setView('owned'));
+$('#nav-wishlist').addEventListener('click', () => setView('wishlist'));
 $('#nav-looks').addEventListener('click', () => setView('looks'));
 $('#nav-settings').addEventListener('click', openSettings);
+$('#shop-home').addEventListener('click', e => { e.preventDefault(); setView('wardrobe'); });
+document.querySelectorAll('[data-shop-view]').forEach(btn => btn.addEventListener('click', () => setView(btn.dataset.shopView)));
+for (const id of ['#shop-add', '#empty-add']) $(id).addEventListener('click', () => {
+  $('#import-collection').value = state.view === 'owned' ? 'owned' : 'wishlist'; openImport();
+});
+$('#shop-search').addEventListener('input', e => { state.query = e.target.value; renderGallery(); });
+$('#shop-sort').addEventListener('change', e => { state.sort = e.target.value; renderGallery(); });
+$('#shop-favorites').addEventListener('click', () => { state.favorites = !state.favorites; renderGallery(); });
+for (const mode of ['modeled', 'product']) $('#mode-' + mode).addEventListener('click', () => {
+  state.previewMode = mode; store.save('previewMode', mode); renderGallery();
+});
+$('#empty-reset').addEventListener('click', () => {
+  state.query = ''; state.favorites = false; state.activeType = 'all'; $('#shop-search').value = ''; renderCategoryNav(); renderGallery();
+});
+
+function updateShopText() {
+  const titles = { wardrobe: tr('Dein persönlicher Shop', 'Your personal shop'), owned: tr('Mein Kleiderschrank', 'My wardrobe'), wishlist: tr('Meine Wunschliste', 'My wishlist'), looks: tr('Meine Outfits', 'My outfits') };
+  const subtitles = { wardrobe: tr('Deine Teile und neue Ideen. Schon an dir.', 'Your pieces and new ideas. Already on you.'), owned: tr('Alles, was du schon hast. Neu kombiniert.', 'Everything you own. New combinations.'), wishlist: tr('Erst an dir ansehen. Dann entscheiden.', 'See it on you. Then decide.'), looks: tr('Deine Teile zusammen an dir ansehen.', 'See your pieces together on you.') };
+  $('#shop-title').textContent = titles[state.view]; $('#shop-subtitle').textContent = subtitles[state.view];
+  $('#nav-wishlist').textContent = tr('Wunschliste', 'Wishlist');
+  $('#shop-add').textContent = tr('Kleidung hinzufügen', 'Add clothing');
+  $('#shop-search-label').textContent = tr('Suchen', 'Search');
+  $('#shop-search').placeholder = tr('Name, Marke oder Farbe', 'Name, brand or color');
+  $('#shop-sort-label').textContent = tr('Sortierung', 'Sort');
+  [...$('#shop-sort').options].forEach((opt, i) => { opt.textContent = [tr('Zuletzt hinzugefügt', 'Recently added'), tr('Name A–Z', 'Name A–Z'), tr('Ohne Anprobe zuerst', 'Not tried on first')][i]; });
+  $('#shop-favorites').textContent = tr('Favoriten', 'Favorites');
+  $('#mode-modeled').textContent = tr('An mir', 'On me'); $('#mode-product').textContent = tr('Produkt', 'Product');
+  $('#shop-view-hint').textContent = state.previewMode === 'modeled' ? tr('Anprobe als Titelbild · Produkt beim Darüberfahren', 'Try-on cover · hover for product') : tr('Produkt als Titelbild · Anprobe beim Darüberfahren', 'Product cover · hover for try-on');
+  const navLabels = { wardrobe: tr('Entdecken', 'Discover'), owned: tr('Mein Schrank', 'Wardrobe'), wishlist: tr('Wunschliste', 'Wishlist'), looks: tr('Outfits', 'Outfits') };
+  const navIcons = { wardrobe: 'photo', owned: 'hanger', wishlist: 'bookmark', looks: 'person' };
+  document.querySelectorAll('[data-shop-view]').forEach(btn => { btn.innerHTML = icon(navIcons[btn.dataset.shopView], 20) + '<span>' + navLabels[btn.dataset.shopView] + '</span>'; });
+  $('#import-collection-label').textContent = tr('Hinzufügen zu', 'Add to');
+  [...$('#import-collection').options].forEach((opt, i) => { opt.textContent = i ? tr('Wunschliste', 'Wishlist') : tr('Mein Kleiderschrank', 'My wardrobe'); });
+  $('#import-try-on-label').textContent = tr('Anprobe gleich mit erstellen', 'Create a try-on too');
+  $('#import-try-on-hint').textContent = tr('Mit Referenzfoto: ein zusätzliches KI-Bild pro Teil. Du kannst die Anprobe später erstellen.', 'With reference photo: one additional AI image per piece. You can also try it on later.');
+}
 
 /* ================= GALERIE ================= */
-
 function renderCategoryNav() {
-  const nav = $('#category-nav');
-  nav.innerHTML = '';
+  const nav = $('#category-nav'); nav.innerHTML = '';
   for (const id of TYPE_IDS) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = typeLabel(id);
+    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = typeLabel(id);
     btn.className = state.activeType === id ? 'active' : '';
-    btn.setAttribute('aria-pressed', state.activeType === id);
-    btn.addEventListener('click', () => { state.activeType = id; state.selectedId = null; renderCategoryNav(); renderGallery(); });
-    nav.appendChild(btn);
+    btn.setAttribute('aria-pressed', String(state.activeType === id));
+    btn.addEventListener('click', () => { state.activeType = id; renderCategoryNav(); renderGallery(); }); nav.appendChild(btn);
   }
 }
-
 function visibleItems() {
-  const filtered = state.activeType === 'all' ? state.items : state.items.filter((i) => i.part === state.activeType);
-  return [...filtered].sort((a, b) => {
-    if (state.activeType === 'all') {
-      const diff = (TYPE_ORDER[a.part] ?? 99) - (TYPE_ORDER[b.part] ?? 99);
-      if (diff) return diff;
-    }
-    return a.id.localeCompare(b.id);
-  });
+  return catalogItems(state.items, { collection: ['owned', 'wishlist'].includes(state.view) ? state.view : 'all', category: state.activeType, query: state.query, sort: state.sort, favorites: state.favorites });
 }
-
+let galleryRender = 0;
 async function renderGallery() {
+  const generation = ++galleryRender;
   const grid = $('#gallery-grid');
-  grid.innerHTML = '';
   const items = visibleItems();
+  grid.setAttribute('aria-busy', 'true');
+  const fragment = document.createDocumentFragment();
   for (const item of items) {
-    const btn = document.createElement('button');
-    btn.className = 'gallery-item' + (state.selectedId === item.id ? ' selected' : '');
-    btn.type = 'button';
-    btn.setAttribute('aria-label', `${item.name || t('viewer.newPiece')}`);
-    const src = await cacheImage(item.imageKey);
-    if (src) {
-      const img = document.createElement('img');
-      img.src = src;
-      img.alt = '';
-      btn.appendChild(img);
-    } else {
-      const fallback = document.createElement('span');
-      fallback.className = 'swatch-fallback';
-      fallback.style.background = item.color || '#c8c8c8';
-      btn.appendChild(fallback);
-    }
-    btn.addEventListener('click', () => openViewer(item.id));
-    grid.appendChild(btn);
+    const [garment, modeled] = await Promise.all([cacheImage(item.imageKey), cacheImage(item.modeledKey)]);
+    if (generation !== galleryRender) return;
+    fragment.append(productCard(item, { garment, modeled, mode: state.previewMode, open: () => openViewer(item.id), favorite: () => {
+      item.favorite = !item.favorite; store.save('items', state.items); if (state.favorites) renderGallery();
+    } }));
   }
-  $('#piece-count').textContent = t('pieces', state.items.length);
-  updateEmptyStates();
+  if (generation !== galleryRender) return;
+  grid.replaceChildren(fragment); grid.setAttribute('aria-busy', 'false');
+  $('#piece-count').textContent = t('pieces', items.length);
+  $('#shop-favorites').setAttribute('aria-pressed', String(state.favorites));
+  $('#mode-modeled').setAttribute('aria-pressed', String(state.previewMode === 'modeled'));
+  $('#mode-product').setAttribute('aria-pressed', String(state.previewMode === 'product'));
+  updateShopText(); updateEmptyStates();
 }
-
 function updateEmptyStates() {
-  $('#status-empty').classList.toggle('hidden', !(state.view === 'wardrobe' && state.items.length === 0));
+  const empty = state.view !== 'looks' && visibleItems().length === 0;
+  $('#status-empty').classList.toggle('hidden', !empty);
+  if (!empty) return;
+  const filtered = Boolean(state.query || state.favorites || state.activeType !== 'all');
+  $('#empty-icon').innerHTML = icon(state.view === 'wishlist' ? 'bookmark' : 'hanger', 36);
+  $('#empty-title').textContent = filtered ? tr('Keine passenden Teile', 'No matching pieces') : state.view === 'wishlist' ? tr('Deine nächste Entdeckung', 'Your next discovery') : tr('Hier beginnt dein persönlicher Shop', 'Your personal shop starts here');
+  $('#empty-description').textContent = filtered ? tr('Ändere deine Suche oder setze die Filter zurück.', 'Change your search or reset the filters.') : tr('Füge ein Kleidungsfoto, einen Screenshot oder einen Produktlink hinzu. Sieh dir deine Auswahl an dir an.', 'Add a clothing photo, screenshot or product link. See your selection on you.');
+  $('#empty-add').textContent = tr('Erstes Teil hinzufügen', 'Add your first piece');
+  $('#empty-add').classList.toggle('hidden', filtered);
+  $('#empty-reset').textContent = tr('Filter zurücksetzen', 'Reset filters');
+  $('#empty-reset').classList.toggle('hidden', !filtered);
 }
 
 /* ================= ITEM-VIEWER (Seitenleiste) ================= */
 
 let viewerEl = null;
+let editorEscapeHandler = null;
+let viewerRequest = 0;
+const tryingOn = new Set();
+let photoTarget = null;
 
 async function openViewer(id) {
+  const request = ++viewerRequest;
   state.selectedId = id;
-  const item = state.items.find((i) => i.id === id);
-  if (!item) return;
-  const garment = await cacheImage(item.imageKey);
-  const modeled = item.modeledKey ? await cacheImage(item.modeledKey) : null;
-  renderGallery();
-  buildViewer(item, garment, modeled);
+  const item = state.items.find(i => i.id === id); if (!item) return;
+  const [garment, modeled] = await Promise.all([cacheImage(item.imageKey), cacheImage(item.modeledKey)]);
+  if (request !== viewerRequest) return;
+  if (editorEscapeHandler) { document.removeEventListener('keydown', editorEscapeHandler); editorEscapeHandler = null; }
+  if (viewerEl) viewerEl.remove();
+  document.body.classList.add('viewer-open'); $('#app-shell').classList.add('has-selection');
+  viewerEl = productDetail(item, {
+    garment, modeled, mode: state.previewMode, close: closeViewer,
+    edit: () => buildViewer(item, garment, modeled),
+    save: () => { store.save('items', state.items); renderGallery(); openViewer(id); },
+    busy: tryingOn.has(id), tryOn: () => tryOnItem(item),
+    attach: () => { photoTarget = id; $('#product-photo-input').click(); },
+    addToLook: () => { lookSelection.add(id); closeViewer(); setView('looks'); $('.looks-composer').scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+  });
+  document.body.append(viewerEl);
 }
-
 function closeViewer() {
-  state.selectedId = null;
+  const selected = state.selectedId;
+  viewerRequest++; state.selectedId = null;
+  if (editorEscapeHandler) { document.removeEventListener('keydown', editorEscapeHandler); editorEscapeHandler = null; }
   if (viewerEl) { viewerEl.remove(); viewerEl = null; }
-  document.body.classList.remove('viewer-open');
-  $('#app-shell').classList.remove('has-selection');
-  renderGallery();
+  document.body.classList.remove('viewer-open'); $('#app-shell').classList.remove('has-selection');
+  renderGallery().then(() => {
+    const idx = visibleItems().findIndex(i => i.id === selected);
+    $('#gallery-grid').querySelectorAll('.product-open')[idx]?.focus({ preventScroll: true });
+  });
+}
+async function tryOnItem(item) {
+  if (tryingOn.has(item.id)) return;
+  if (!requireSetup(true) || !canGenerate()) return;
+  if (!item.imageKey) { notify(tr('Ergänze zuerst ein Produktfoto.', 'Add a product photo first.')); return; }
+  tryingOn.add(item.id); openViewer(item.id);
+  try {
+    const [modelRef, garment] = await Promise.all([imageStore.get('model-reference'), cacheImage(item.imageKey)]);
+    if (!garment) throw new Error(tr('Das Produktfoto fehlt. Bitte ergänzen.', 'The product photo is missing. Please add it.'));
+    const result = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt: ai.MODELED_PROMPT, images: [modelRef, garment], size: '1024x1536' });
+
+    if (!state.items.includes(item)) return;
+    const key = 'modeled-' + item.id; await imageStore.put(key, result); imageCache.set(key, result); item.modeledKey = key;
+    store.save('items', state.items); renderGallery(); notify(tr('Deine Anprobe ist fertig.', 'Your try-on is ready.'));
+  } catch (e) { notify(e.message); }
+  finally { tryingOn.delete(item.id); if (state.selectedId === item.id) openViewer(item.id); }
+}
+$('#product-photo-input').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  const item = state.items.find(i => i.id === photoTarget); if (!file || !item) return;
+  if (tryingOn.has(item.id)) { notify(tr('Warte, bis die Anprobe fertig ist.', 'Wait until the try-on finishes.')); return; }
+  try {
+    const dataUrl = await fileDataUrl(file);
+    const normalized = await ai.normalizeImage(dataUrl, 1280);
+    const key = 'garment-' + item.id, cropKey = 'crop-' + item.id;
+    await imageStore.put(key, normalized); await imageStore.put(cropKey, normalized);
+    imageCache.set(key, normalized); imageCache.set(cropKey, normalized);
+    if (item.modeledKey) { await imageStore.delete(item.modeledKey); imageCache.delete(item.modeledKey); }
+    Object.assign(item, { imageKey: key, cropKey, modeledKey: null });
+    store.save('items', state.items); renderGallery();
+    if (state.selectedId === item.id) openViewer(item.id);
+    notify(tr('Produktfoto gespeichert. Bereit für die Anprobe.', 'Product photo saved. Ready to try on.'));
+  } catch (e) { notify(e.message); }
+});
+function fileDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) { reject(new Error(tr('Bitte ein Bild auswählen.', 'Please choose an image.'))); return; }
+    const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error(tr('Foto konnte nicht gelesen werden.', 'Could not read photo.'))); reader.readAsDataURL(file);
+  });
 }
 
 function rgbToHex(r, g, b) {
@@ -227,6 +336,7 @@ function extractPalette(image) {
 function buildViewer(item, garmentSrc, modeledSrc) {
   document.body.classList.add('viewer-open');
   $('#app-shell').classList.add('has-selection');
+  if (editorEscapeHandler) { document.removeEventListener('keydown', editorEscapeHandler); editorEscapeHandler = null; }
   if (viewerEl) viewerEl.remove();
 
   const overlay = document.createElement('div');
@@ -234,7 +344,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) requestClose(); });
 
   const singular = typeSingular(item.part) || t('viewer.newPiece');
-  const draft = { name: item.name || '', part: item.part, color: item.color || '#9a9286', secondaryColor: item.secondaryColor || null, material: item.material || '', pattern: item.pattern || '', tags: [...(item.tags || [])] };
+  const draft = { brand: item.brand || '', size: item.size || '', link: item.link || '', name: item.name || '', part: item.part, color: item.color || '#9a9286', secondaryColor: item.secondaryColor || null, material: item.material || '', pattern: item.pattern || '', tags: [...(item.tags || [])] };
   let palette = [...(item.palette || [])];
   let sampling = null;
   let samplingCanvas = null;
@@ -248,8 +358,8 @@ function buildViewer(item, garmentSrc, modeledSrc) {
 
   function isDirty() {
     const norm = (t) => t.map((x) => x.trim()).filter(Boolean);
-    return JSON.stringify({ name: draft.name.trim(), part: draft.part, color: draft.color?.toLowerCase() || null, secondaryColor: draft.secondaryColor?.toLowerCase() || null, material: draft.material.trim(), pattern: draft.pattern.trim(), tags: norm(draft.tags) })
-      !== JSON.stringify({ name: (item.name || '').trim(), part: item.part, color: item.color?.toLowerCase() || null, secondaryColor: item.secondaryColor?.toLowerCase() || null, material: (item.material || '').trim(), pattern: (item.pattern || '').trim(), tags: norm(item.tags || []) });
+    return JSON.stringify({ brand: draft.brand.trim(), size: draft.size.trim(), link: draft.link.trim(), name: draft.name.trim(), part: draft.part, color: draft.color?.toLowerCase() || null, secondaryColor: draft.secondaryColor?.toLowerCase() || null, material: draft.material.trim(), pattern: draft.pattern.trim(), tags: norm(draft.tags) })
+      !== JSON.stringify({ brand: (item.brand || '').trim(), size: (item.size || '').trim(), link: (item.link || '').trim(), name: (item.name || '').trim(), part: item.part, color: item.color?.toLowerCase() || null, secondaryColor: item.secondaryColor?.toLowerCase() || null, material: (item.material || '').trim(), pattern: (item.pattern || '').trim(), tags: norm(item.tags || []) });
   }
   function requestClose() {
     if (isDirty()) { aside.classList.remove('shake'); void aside.offsetWidth; aside.classList.add('shake'); }
@@ -261,6 +371,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     const close = document.createElement('button');
     close.className = 'viewer-icon-close';
     close.innerHTML = icon('x', 24);
+    close.setAttribute('aria-label', tr('Schließen', 'Close'));
     close.addEventListener('click', requestClose);
 
     const artwork = document.createElement('div');
@@ -416,6 +527,12 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     sel.addEventListener('change', (e) => { draft.part = e.target.value; });
     catField.appendChild(sel);
     wrap.appendChild(catField);
+    for (const [key, label] of [['brand', tr('Marke', 'Brand')], ['size', tr('Größe', 'Size')], ['link', tr('Produktlink', 'Product link')]]) {
+      const field = document.createElement('label'); field.className = 'field';
+      const caption = document.createElement('span'); caption.textContent = label;
+      const input = document.createElement('input'); input.type = key === 'link' ? 'url' : 'text'; input.value = draft[key];
+      input.addEventListener('input', () => { draft[key] = input.value; }); field.append(caption, input); wrap.append(field);
+    }
 
     const colorField = document.createElement('fieldset');
     colorField.className = 'color-field';
@@ -479,6 +596,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
     cancel.addEventListener('click', closeViewer);
     function persistDraft() {
       Object.assign(item, {
+        brand: draft.brand.trim(), size: draft.size.trim(), link: safeShopUrl(draft.link) || '',
         name: draft.name.trim(), part: draft.part, color: draft.color, secondaryColor: draft.secondaryColor,
         material: draft.material.trim() || null, pattern: draft.pattern.trim() || null,
         tags: draft.tags.map((x) => x.trim()).filter(Boolean),
@@ -528,6 +646,7 @@ function buildViewer(item, garmentSrc, modeledSrc) {
   overlay.appendChild(entry);
   document.body.appendChild(overlay);
   viewerEl = overlay;
+  editorEscapeHandler = escHandler;
   document.addEventListener('keydown', escHandler);
   function escHandler(e) {
     if (e.key !== 'Escape') return;
@@ -618,8 +737,8 @@ async function regenerateItem(item) {
     { name: item.name, part: item.part, color: item.color, secondaryColor: item.secondaryColor, material: item.material, pattern: item.pattern, tags: item.tags },
     chromaKey,
   );
-  const raw = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [cropImage], size: '1024x1024' });
-  bumpUsage();
+  const raw = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [cropImage], size: '1024x1024' });
+
   const result = await ai.processChromaBackground(raw, chromaKey, {});
   await imageStore.put(item.imageKey, result.dataUrl);
   imageCache.set(item.imageKey, result.dataUrl);
@@ -629,8 +748,8 @@ async function regenerateItem(item) {
     const isPlainPattern = !item.pattern || /^(uni|einfarbig|solid|plain)/i.test(item.pattern);
     const detail = [item.material ? `${item.material} fabric` : null, !isPlainPattern ? `${item.pattern} pattern` : null].filter(Boolean).join(' and ');
     const prompt2 = ai.MODELED_PROMPT + (detail ? `\nMake sure the garment's ${detail} is clearly visible and accurately rendered.` : '');
-    const modeled = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt: prompt2, images: [modelRef, result.dataUrl], size: '1024x1536' });
-    bumpUsage();
+    const modeled = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt: prompt2, images: [modelRef, result.dataUrl], size: '1024x1536' });
+
     await imageStore.put(item.modeledKey, modeled);
     imageCache.set(item.modeledKey, modeled);
   }
@@ -686,9 +805,9 @@ $('#import-backdrop').addEventListener('mousedown', (e) => { if (e.target === $(
 function openImport() { importOpen = true; $('#import-backdrop').dataset.open = 'true'; renderImport(); }
 function closeImport() { importOpen = false; $('#import-backdrop').dataset.open = 'false'; }
 
-function requireSetup() {
-  if (!state.settings.openaiKey) { openSettings(); return false; }
-  if (!state.hasModelReference) { openSettings(); return false; }
+function requireSetup(needsReference = true) {
+  if (!state.settings.openaiKey) { notify(tr('Hinterlege deinen API-Schlüssel in den Einstellungen.', 'Add your API key in settings.')); openSettings(); return false; }
+  if (needsReference && !state.hasModelReference) { notify(tr('Wähle für die Anprobe dein Ganzkörperfoto.', 'Choose your full-body photo for try-on.')); openSettings(); return false; }
   return true;
 }
 
@@ -696,17 +815,17 @@ async function submitFiles(files, opts = {}) {
   const auto = !!opts.auto;
   const images = [...files].filter((f) => f.type.startsWith('image/'));
   if (!images.length) return;
-  if (!requireSetup()) return;
+  if (!requireSetup(false)) return;
   openImport();
   for (const file of images) {
-    const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
-    await analyzeAndQueue(dataUrl, auto);
+    try { const dataUrl = await fileDataUrl(file); await analyzeAndQueue(dataUrl, auto); } catch (e) { showImportError(e.message); }
   }
 }
 
 // auto=true: jedes erkannte Teil durchläuft Zuschnitt→Freisteller→Model-Foto automatisch
 // (siehe Auto-Verkettung am Ende von advanceCrop/approveGarment), ohne Einzel-Bestätigung.
 async function analyzeAndQueue(dataUrl, auto = false) {
+  const preferences = { collection: $('#import-collection').value, tryOn: $('#import-try-on').checked };
   const pending = { id: uid(), stage: 'analyzing' };
   jobs.push(pending);
   renderTrayButton(); renderImport();
@@ -717,7 +836,7 @@ async function analyzeAndQueue(dataUrl, auto = false) {
     if (!detected.length) { showImportError(t('err.noClothing')); renderTrayButton(); renderImport(); return; }
     for (const meta of detected) {
       const crop = await ai.cropDetectedItem(normalized, meta.boundingBox);
-      const job = { id: uid(), stage: 'crop-review', metadata: meta, original: normalized, cropImage: crop, auto };
+      const job = { id: uid(), stage: 'crop-review', metadata: meta, original: normalized, cropImage: crop, auto, ...preferences };
       jobs.push(job);
       renderTrayButton(); renderImport();
       if (auto) await advanceCrop(job);
@@ -730,24 +849,31 @@ async function analyzeAndQueue(dataUrl, auto = false) {
 }
 
 function showImportError(msg) {
+  if (!importOpen) { notify(msg); return; }
   const el = $('#import-error');
   el.textContent = msg;
   el.classList.remove('hidden');
   setTimeout(() => el.classList.add('hidden'), 8000);
 }
 
-// Link-Import: analysiert per Gemini und legt ein Teil ohne Model-Foto an (Farbe/Name),
-// da Shops kein isoliertes Kleidungsbild liefern, das wir freistellen könnten.
+// Bookmark immediately; optional provider enriches metadata. Product photos can
+// be attached without relying on cross-origin shop image access.
 $('#import-link-add').addEventListener('click', async () => {
   const link = $('#import-link').value.trim();
   if (!link) return;
-  if (!state.settings.geminiKey) { showImportError(t('err.needGemini')); return; }
+  if (!safeShopUrl(link)) { showImportError(tr('Bitte einen gültigen http(s)-Produktlink eingeben.', 'Enter a valid http(s) product link.')); return; }
+  const collection = $('#import-collection').value;
   $('#import-link-add').disabled = true;
   try {
-    const info = await analyzeShopUrl({ apiKey: state.settings.geminiKey, link });
+    let info = {};
+    if (state.settings.geminiKey) {
+      try { info = await analyzeShopUrl({ apiKey: state.settings.geminiKey, link }); }
+      catch { notify(tr('Produktdetails nicht abrufbar. Der Link wird trotzdem gespeichert.', 'Product details unavailable. Saving the link anyway.')); }
+    }
     const item = {
       id: uid(),
-      name: info.name || 'Neues Teil',
+      collection, favorite: false, brand: info.brand || '', size: info.size || '',
+      name: info.name || tr('Neues Teil', 'New piece'),
       part: info.part || 'upperbody',
       color: info.color || '#c8c8c8',
       secondaryColor: null,
@@ -761,20 +887,22 @@ $('#import-link-add').addEventListener('click', async () => {
     store.save('items', state.items);
     $('#import-link').value = '';
     renderGallery(); renderCategoryNav();
-    showImportError(t('link.imported', item.name));
+    closeImport(); openViewer(item.id);
+    notify(tr('Gespeichert. Ergänze ein Produktfoto für die Anprobe.', 'Saved. Add a product photo to try it on.'));
   } catch (e) { showImportError(e.message); }
   finally { $('#import-link-add').disabled = false; }
 });
 
 async function advanceCrop(job) {
+  if (job.stage === 'garment-processing') return;
   if (!canGenerate()) return;
   job.stage = 'garment-processing';
   renderTrayButton(); renderImport();
   try {
     const chromaKey = ai.chooseChromaKey(job.metadata.color);
     const prompt = ai.buildGarmentPrompt(job.metadata, chromaKey) + (job.regenDirection ? `\nUser regeneration direction: ${job.regenDirection}` : '');
-    const raw = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [job.cropImage], size: '1024x1024' });
-    bumpUsage();
+    const raw = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [job.cropImage], size: '1024x1024' });
+
     job.garmentSource = raw;
     job.chromaKey = chromaKey;
     const result = await ai.processChromaBackground(raw, chromaKey, {});
@@ -784,6 +912,7 @@ async function advanceCrop(job) {
     job.stage = 'garment-review';
   } catch (e) { job.stage = 'error'; job.error = e.message; }
   renderTrayButton(); renderImport();
+  if (!jobs.includes(job)) return;
   if (job.auto && job.stage === 'garment-review') await approveGarment(job);
 }
 
@@ -798,8 +927,17 @@ async function recleanup(job, tolerance) {
 }
 
 async function approveGarment(job) {
+  if (job.saving || job.stage === 'modeled-processing') return;
+  job.saving = true;
+  try { await saveGarmentAndTryOn(job); }
+  catch (e) { job.stage = 'error'; job.error = e.message; renderTrayButton(); renderImport(); }
+  finally { job.saving = false; }
+}
+async function saveGarmentAndTryOn(job) {
   // Teil in den Kleiderschrank aufnehmen (Freisteller)
-  const itemId = uid();
+  if (job.stage === 'modeled-processing') return;
+  const itemId = job.itemId || uid();
+  job.itemId = itemId;
   const imageKey = `garment-${itemId}`;
   await imageStore.put(imageKey, job.garmentImage);
   imageCache.set(imageKey, job.garmentImage);
@@ -807,7 +945,9 @@ async function approveGarment(job) {
   const cropKey = `crop-${itemId}`;
   await imageStore.put(cropKey, job.cropImage);
   imageCache.set(cropKey, job.cropImage);
-  const item = {
+  const existing = state.items.find(i => i.id === itemId);
+  const item = existing || {
+    collection: job.collection === 'wishlist' ? 'wishlist' : 'owned', favorite: false,
     id: itemId,
     name: job.metadata.name,
     part: job.metadata.part,
@@ -821,10 +961,14 @@ async function approveGarment(job) {
     cropKey,
     palette: [job.metadata.color, job.metadata.secondaryColor].filter(Boolean),
   };
-  state.items.unshift(item);
+  if (!existing) state.items.unshift(item);
   store.save('items', state.items);
   renderGallery(); renderCategoryNav();
   job.itemId = itemId;
+  if (!job.tryOn || !state.hasModelReference) {
+    if (job.tryOn && !state.hasModelReference) notify(tr('Teil gespeichert. Ergänze dein Referenzfoto für die spätere Anprobe.', 'Piece saved. Add a reference photo to try it on later.'));
+    removeJob(job); return;
+  }
   // Limit erreicht? Teil bleibt im Schrank (Freisteller), Model-Foto entfällt.
   if (!canGenerate()) { removeJob(job); return; }
   job.stage = 'modeled-processing';
@@ -833,12 +977,13 @@ async function approveGarment(job) {
   try {
     const modelRef = await imageStore.get('model-reference');
     const prompt = ai.MODELED_PROMPT + (job.modeledDirection ? `\nUser regeneration direction: ${job.modeledDirection}` : '');
-    const modeled = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, job.garmentImage], size: '1024x1536' });
-    bumpUsage();
+    const modeled = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, job.garmentImage], size: '1024x1536' });
+
     job.modeledImage = modeled;
     job.stage = 'modeled-review';
   } catch (e) { job.stage = 'modeled-error'; job.error = e.message; }
   renderTrayButton(); renderImport();
+  if (!jobs.includes(job)) return;
   if (job.auto && job.stage === 'modeled-review') await approveModeled(job);
 }
 
@@ -1106,7 +1251,8 @@ window.addEventListener('paste', (e) => { const files = [...(e.clipboardData?.fi
 
 const lookSelection = new Set();
 let lookResult = null;
-const DEFAULT_PROFILE_FOR_ADVICE = { hair: '#3b2a1e', eyes: '#4a6b8a' };
+let lookResultIds = [];
+const DEFAULT_PROFILE_FOR_ADVICE = {};
 
 // Überlappende Kleinvorschau mehrerer Teile (Vorschlags-Karten + Hover-Preview)
 function buildPieceCollage(imgSrcs) {
@@ -1334,9 +1480,10 @@ async function openLookDetail(look) {
       const modelRef = await imageStore.get('model-reference');
       const garments = [];
       for (const item of items) { const g = await cacheImage(item.imageKey); if (g) garments.push(g); }
-      const prompt = ai.buildLookPrompt(garments.length, '');
-      const result = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, ...garments], size: '1024x1536' });
-      bumpUsage();
+      if (garments.length !== items.length) throw new Error(tr('Für ein ausgewähltes Teil fehlt das Produktfoto. Ergänze es vor der Anprobe.', 'A selected piece has no product photo. Add it before trying on.'));
+    const prompt = ai.buildLookPrompt(garments.length, '');
+      const result = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, ...garments], size: '1024x1536' });
+
       await imageStore.put(look.imageKey, result);
       imageCache.set(look.imageKey, result);
       store.save('looks', state.looks);
@@ -1368,6 +1515,9 @@ async function renderLooks() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'look-pick' + (lookSelection.has(item.id) ? ' selected' : '');
+    btn.setAttribute('aria-label', item.name);
+    btn.setAttribute('aria-pressed', String(lookSelection.has(item.id)));
+    btn.title = item.name;
     const src = item.modeledKey ? await cacheImage(item.modeledKey) : await cacheImage(item.imageKey);
     if (src) { const img = document.createElement('img'); img.src = src; btn.appendChild(img); }
     else { const s = document.createElement('span'); s.className = 'swatch-fallback'; s.style.background = item.color; btn.appendChild(s); }
@@ -1446,10 +1596,12 @@ $('#btn-look-generate').addEventListener('click', async () => {
     const modelRef = await imageStore.get('model-reference');
     const garments = [];
     for (const item of items) { const g = await cacheImage(item.imageKey); if (g) garments.push(g); }
+    if (garments.length !== items.length) throw new Error(tr('Für ein ausgewähltes Teil fehlt das Produktfoto. Ergänze es vor der Anprobe.', 'A selected piece has no product photo. Add it before trying on.'));
     const prompt = ai.buildLookPrompt(garments.length, $('#look-note').value.trim());
-    const result = await ai.openAIEdit({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, ...garments], size: '1024x1536' });
-    bumpUsage();
+    const result = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt, images: [modelRef, ...garments], size: '1024x1536' });
+
     lookResult = result;
+    lookResultIds = items.map(item => item.id);
     const box = $('#look-result');
     box.classList.remove('hidden');
     box.querySelector('img').src = result;
@@ -1463,9 +1615,9 @@ $('#btn-look-save').addEventListener('click', async () => {
   const imageKey = `look-${id}`;
   await imageStore.put(imageKey, lookResult);
   imageCache.set(imageKey, lookResult);
-  const items = selectedLookItems();
+  const items = lookResultIds.map(id => state.items.find(item => item.id === id)).filter(Boolean);
   const { description, tags } = describeLook(items);
-  const look = { id, name: $('#look-name').value.trim() || t('looks.defaultName'), itemIds: [...lookSelection], imageKey, description, tags, fav: false, createdAt: Date.now() };
+  const look = { id, name: $('#look-name').value.trim() || t('looks.defaultName'), itemIds: [...lookResultIds], imageKey, description, tags, fav: false, createdAt: Date.now() };
   state.looks.unshift(look);
   store.save('looks', state.looks);
   $('#look-name').value = '';
@@ -1508,7 +1660,7 @@ $('#backup-export').addEventListener('click', async () => {
       version: 1,
       exportedAt: new Date().toISOString(),
       lang: getLang(),
-      settings: state.settings,
+      settings: withoutSecrets(state.settings),
       rules: state.rules,
       usage: state.usage,
       items: state.items,
@@ -1552,7 +1704,7 @@ $('#backup-import-input').addEventListener('change', async (e) => {
       await imageStore.put(key, dataUrl);
       imageCache.set(key, dataUrl);
     }
-    state.settings = { ...state.settings, ...data.settings };
+    state.settings = { ...state.settings, ...withoutSecrets(data.settings) };
     state.rules = data.rules || state.rules;
     state.usage = data.usage || state.usage;
     state.items = data.items || [];
@@ -1660,6 +1812,7 @@ function applyTheme(theme) {
 function applyLang() {
   applyStaticTranslations();
   $('#toggle-lang').textContent = getLang().toUpperCase();
+  updateShopText();
   renderCategoryNav();
   renderGallery();
   renderTrayButton();

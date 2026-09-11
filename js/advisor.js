@@ -137,14 +137,14 @@ export function analyzeOutfit(items, profile, rules) {
   const hair = hexToHsl(profile?.hair || '#3b2a1e');
   const eyes = hexToHsl(profile?.eyes || '#4a6b8a');
   for (const gr of colored) {
-    if (hueDist(gr.hsl.h, eyes.h) < 30 && eyes.s > 15) {
+    if (profile?.eyes && hueDist(gr.hsl.h, eyes.h) < 30 && eyes.s > 15) {
       score += 6;
       good.push(`das ${colorName(gr.hex)} greift deine Augenfarbe auf und lässt sie leuchten`);
       break;
     }
   }
   for (const gr of colored) {
-    if (hueDist(gr.hsl.h, hair.h) < 25 && Math.abs(gr.hsl.l - hair.l) < 25) {
+    if (profile?.hair && hueDist(gr.hsl.h, hair.h) < 25 && Math.abs(gr.hsl.l - hair.l) < 25) {
       score += 4;
       good.push('einer der Töne matcht mit deinen Haaren – das bindet den Look zusammen');
       break;

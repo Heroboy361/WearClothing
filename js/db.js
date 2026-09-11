@@ -23,7 +23,9 @@ function tx(mode, fn) {
     const t = db.transaction(STORE, mode);
     const store = t.objectStore(STORE);
     const req = fn(store);
-    req.onsuccess = () => resolve(req.result);
+    t.oncomplete = () => resolve(req.result);
+    t.onabort = () => reject(t.error || new Error("Bildspeicherung abgebrochen"));
+    t.onerror = () => reject(t.error || req.error);
     req.onerror = () => reject(req.error);
   }));
 }

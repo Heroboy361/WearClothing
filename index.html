@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>WearClothing – Wardrobe</title>
+  <title>WearClothing – Mein persönlicher Shop</title>
   <meta name="description" content="Dein Kleiderschrank – Teile importieren, freistellen, an dir selbst als Model-Foto sehen und Looks stylen.">
   <meta name="theme-color" content="#f4f0e8" id="theme-color-meta">
   <link rel="manifest" href="manifest.webmanifest">
@@ -31,20 +31,31 @@
     <main class="gallery-pane">
       <header class="gallery-header">
         <div class="gallery-meta-row">
-          <p class="piece-count" id="piece-count">0</p>
+          <a class="shop-wordmark" href="#" id="shop-home">WearClothing<span>PERSONAL WARDROBE</span></a>
           <div class="header-tools">
             <button type="button" class="header-tool" id="nav-wardrobe" data-i18n="nav.wardrobe">Kleiderschrank</button>
+            <button type="button" class="header-tool" id="nav-wishlist">Wunschliste</button>
             <button type="button" class="header-tool" id="nav-looks" data-i18n="nav.looks">Looks</button>
             <button type="button" class="header-tool icon-only" id="toggle-lang" data-i18n-aria="lang.toggle">DE</button>
             <button type="button" class="header-tool icon-only" id="toggle-theme" data-i18n-aria="theme.toggle"></button>
             <button type="button" class="header-tool icon-only" id="nav-settings" data-i18n-aria="settings.aria"></button>
           </div>
         </div>
+        <div class="shop-heading"><div><h1 id="shop-title">Dein persönlicher Shop</h1><p id="shop-subtitle">Deine Teile und neue Ideen. Schon an dir.</p></div><button type="button" class="primary-button" id="shop-add">Kleidung hinzufügen</button></div>
+        <div class="shop-toolbar" id="shop-toolbar">
+          <label class="shop-search"><span id="shop-search-label">Suchen</span><input type="search" id="shop-search" placeholder="Name, Marke oder Farbe" autocomplete="off"></label>
+          <div class="shop-controls">
+            <button type="button" class="secondary-button" id="shop-favorites" aria-pressed="false">Favoriten</button>
+            <div class="shop-mode" role="group" aria-label="Bildansicht"><button type="button" id="mode-modeled" aria-pressed="true">An mir</button><button type="button" id="mode-product" aria-pressed="false">Produkt</button></div>
+            <label class="shop-sort"><span id="shop-sort-label">Sortierung</span><select id="shop-sort"><option value="newest">Zuletzt hinzugefügt</option><option value="name">Name A–Z</option><option value="untried">Ohne Anprobe zuerst</option></select></label>
+          </div>
+        </div>
         <nav class="category-nav" id="category-nav" aria-label="Kategorie"></nav>
       </header>
 
-      <p class="status error hidden" id="status-error"></p>
-      <p class="status empty hidden" id="status-empty" data-i18n="empty.wardrobe"></p>
+      <div class="shop-result-meta"><p class="piece-count" id="piece-count">0</p><span id="shop-view-hint"></span></div>
+      <p class="status error hidden" id="status-error" role="alert"></p>
+      <section class="shop-empty hidden" id="status-empty"><span id="empty-icon"></span><h2 id="empty-title"></h2><p id="empty-description"></p><button type="button" class="primary-button" id="empty-add"></button><button type="button" class="secondary-button hidden" id="empty-reset"></button></section>
 
       <section class="gallery-grid" id="gallery-grid" aria-label="Wardrobe"></section>
 
@@ -83,6 +94,8 @@
       </section>
     </main>
 
+    <nav class="shop-mobile-nav" aria-label="Hauptnavigation"><button type="button" data-shop-view="wardrobe">Entdecken</button><button type="button" data-shop-view="owned">Mein Schrank</button><button type="button" data-shop-view="wishlist">Wunschliste</button><button type="button" data-shop-view="looks">Outfits</button></nav>
+    <input type="file" id="product-photo-input" accept="image/*" hidden>
     <input type="file" id="import-input" accept="image/*" multiple hidden>
     <input type="file" id="import-input-auto" accept="image/*" multiple hidden>
     <div class="import-drop-overlay" id="drop-overlay" data-active="false" aria-hidden="true">
@@ -112,9 +125,14 @@
           </div>
           <button class="import-icon-button" type="button" id="import-close" data-i18n-aria="import.close"></button>
         </header>
+        <div class="import-preferences">
+          <label><span id="import-collection-label">Hinzufügen zu</span><select id="import-collection"><option value="owned">Mein Kleiderschrank</option><option value="wishlist">Wunschliste</option></select></label>
+          <label class="settings-check"><input type="checkbox" id="import-try-on" checked><span id="import-try-on-label">Anprobe gleich mit erstellen</span></label>
+          <p class="settings-note" id="import-try-on-hint">Mit Referenzfoto: ein zusätzliches KI-Bild pro Teil. Du kannst die Anprobe später erstellen.</p>
+        </div>
         <div id="import-body"></div>
         <div class="import-link-row">
-          <input type="url" id="import-link" data-i18n-ph="import.link.ph" inputmode="url" autocomplete="off" style="padding:11px 12px;color:var(--import-ink);background:transparent;border:1px solid var(--import-line);border-radius:10px;font:inherit;font-size:13px">
+          <input type="url" id="import-link" aria-label="Produktlink" data-i18n-ph="import.link.ph" inputmode="url" autocomplete="off" style="padding:11px 12px;color:var(--import-ink);background:transparent;border:1px solid var(--import-line);border-radius:10px;font:inherit;font-size:13px">
           <button class="import-button" type="button" id="import-link-add" data-i18n="import.link.add">Link importieren</button>
         </div>
         <p class="import-status is-error hidden" id="import-error" role="alert"></p>
