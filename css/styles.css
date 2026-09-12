@@ -1395,7 +1395,7 @@ html.locked .app-shell { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { .product-media img { transition: none; } }
 
 /* Reference shop: right drawers, flat-lay hover and visible theme control. */
-.header-tools > #toggle-theme { display: inline-flex; min-width: 44px; min-height: 44px; }
+.header-tools > button#toggle-theme { display: inline-flex; min-width: 44px; min-height: 44px; }
 .product-overlay { padding: 0; align-items: stretch; justify-content: flex-end; }
 .product-dialog { width: min(520px, 100%); max-height: 100dvh; height: 100dvh; display: block; border-radius: 0; animation: viewer-in 240ms ease both; }
 .product-detail-media { position: relative; padding: 28px 24px 16px; }
