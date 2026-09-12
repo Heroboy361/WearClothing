@@ -19,7 +19,7 @@ export async function analyzeShopUrl({ apiKey, link }) {
     'You are a product analyzer for a virtual wardrobe app.',
     `Read the product page at this URL and extract its data: ${link}`,
     'Respond with ONLY minified JSON, no markdown, exactly this shape:',
-    `{"name":"short product name, German if the shop is German, else original","category":"one of ${CATEGORIES.join('|')}","color_name":"the shop's marketing color name if stated (e.g. Ocean Blue), else a German color word","color_hex":"#rrggbb approximation of the main color","size":"the selected/stated size or null","brand":"brand name or null","tags":["1-4 lowercase German detail tags"]}`,
+    `{"name":"short product name, German if the shop is German, else original","category":"one of ${CATEGORIES.join('|')}","color_name":"the shop's marketing color name if stated (e.g. Ocean Blue), else a German color word","color_hex":"#rrggbb approximation of the main color","image_url":"exact product image URL found in the page, or null; never invent a URL","size":"the selected/stated size or null","brand":"brand name or null","tags":["1-4 lowercase German detail tags"]}`,
     'If the URL cannot be read, derive as much as possible from the URL text itself.',
   ].join('\n');
 
@@ -41,6 +41,7 @@ export async function analyzeShopUrl({ apiKey, link }) {
 
   return {
     name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 80) : null,
+    imageUrl: typeof raw.image_url === 'string' && /^https?:\/\//i.test(raw.image_url) ? raw.image_url : null,
     part: CATEGORY_TO_PART[raw.category] || null,
     colorName: typeof raw.color_name === 'string' && raw.color_name.trim() ? raw.color_name.trim().slice(0, 32) : null,
     color: /^#[0-9a-f]{6}$/i.test(raw.color_hex || '') ? raw.color_hex.toLowerCase() : null,

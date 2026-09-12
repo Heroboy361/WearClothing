@@ -44,7 +44,7 @@ export function productCard(item, { garment, modeled, mode, open, favorite }) {
 }
 
 // Product browsing is separate from the detailed metadata editor.
-export function productDetail(item, { garment, modeled, mode, close, edit, save, tryOn, attach, addToLook, busy }) {
+export function productDetail(item, { garment, modeled, mode, close, edit, save, tryOn, attach, addToLook, busy, variants = [], createVariant }) {
   const overlay = el('div', 'product-overlay');
   const dialog = el('section', 'product-dialog');
   dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-labelledby', 'product-title');
@@ -63,6 +63,11 @@ export function productDetail(item, { garment, modeled, mode, close, edit, save,
   }
   chooseImage(mode === 'modeled' && modeled ? 'modeled' : garment ? 'garment' : 'modeled');
   media.append(picture, tabs);
+  if (garment && modeled) {
+    const inset = el('img', 'product-inset'); inset.src = garment; inset.alt = item.name;
+    media.append(inset);
+  }
+
   const content = el('div', 'product-detail-content');
   content.append(el('p', 'product-eyebrow', collectionOf(item) === 'wishlist' ? tr('Meine Wunschliste', 'My wishlist') : tr('Mein Kleiderschrank', 'My wardrobe')));
   const title = el('h2', '', item.name || tr('Neues Teil', 'New piece')); title.id = 'product-title'; content.append(title);
@@ -75,6 +80,30 @@ export function productDetail(item, { garment, modeled, mode, close, edit, save,
   if (!garment) actions.append(button(tr('Produktfoto hinzufügen', 'Add product photo'), 'primary-button', attach));
   const look = button(tr('Mit meinen Teilen kombinieren', 'Combine with my pieces'), 'secondary-button', addToLook); look.disabled = !garment; actions.append(look);
   content.append(actions);
+  if (createVariant) {
+    const variantsBox = el('div', 'product-variants');
+    variantsBox.append(el('h3', '', tr('Farbe an mir ausprobieren', 'Try a color on me')));
+    variantsBox.append(el('p', 'product-facts', tr('KI-Farbidee · keine bestätigte Shop-Variante. Eine Vorschau erzeugt ein KI-Bild.', 'AI color concept · not a confirmed shop variant. Each preview generates one AI image.')));
+    const label = el('label', 'variant-picker', tr('Wunschfarbe', 'Desired color'));
+    const color = el('input'); color.type = 'color'; color.value = /^#[0-9a-f]{6}$/i.test(item.color) ? item.color : '#333333'; label.append(color);
+    const generateColor = button(tr('Farbvorschau erstellen', 'Create color preview'), 'secondary-button', () => createVariant(color.value));
+    generateColor.disabled = busy || !garment;
+    variantsBox.append(label, generateColor);
+    const previews = el('div', 'variant-previews');
+    for (const variant of variants) {
+      const b = button('', 'variant-preview', () => {
+        picture.replaceChildren();
+        const img = el('img', 'is-modeled'); img.src = variant.src; img.alt = tr('KI-Farbidee ', 'AI color concept ') + variant.color; picture.append(img);
+        tabs.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', 'false'));
+        previews.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      });
+      b.setAttribute('aria-label', tr('KI-Farbidee ', 'AI color concept ') + variant.color); b.setAttribute('aria-pressed', 'false');
+      const thumb = el('img'); thumb.src = variant.src; thumb.alt = ''; b.append(thumb, el('span', '', variant.color)); previews.append(b);
+    }
+    variantsBox.append(previews); content.append(variantsBox);
+    tabs.addEventListener('click', () => previews.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', 'false')));
+  }
+
   const ownership = button(collectionOf(item) === 'wishlist' ? tr('Gekauft · in meinen Schrank', 'Purchased · move to wardrobe') : tr('Auf die Wunschliste verschieben', 'Move to wishlist'), 'secondary-button', () => { item.collection = collectionOf(item) === 'wishlist' ? 'owned' : 'wishlist'; save(); });
   const fav = button(item.favorite ? tr('Favorit entfernen', 'Remove favorite') : tr('Als Favorit merken', 'Add to favorites'), 'secondary-button', () => { item.favorite = !item.favorite; save(); });
   const secondary = el('div', 'product-secondary-actions'); secondary.append(ownership, fav); content.append(secondary);
@@ -90,7 +119,7 @@ export function productDetail(item, { garment, modeled, mode, close, edit, save,
   overlay.addEventListener('keydown', e => {
     if (e.key === 'Escape') { e.preventDefault(); close(); }
     if (e.key === 'Tab') {
-      const controls = [...dialog.querySelectorAll('button:not(:disabled), a[href]')];
+      const controls = [...dialog.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled)')];
       const first = controls[0], last = controls.at(-1);
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }

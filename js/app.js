@@ -5,6 +5,7 @@ import { catalogItems, collectionOf, safeShopUrl, withoutSecrets } from './catal
 import { productCard, productDetail, shopText as tr } from './shop.js';
 import * as ai from './openai.js';
 import { analyzeShopUrl } from './gemini.js';
+import { readProductPage, loadProductImage } from './product-import.js';
 import { analyzeOutfit, isNeutral } from './advisor.js';
 import { t, getLang, setLang, applyStaticTranslations } from './i18n.js';
 
@@ -237,12 +238,13 @@ async function openViewer(id) {
   state.selectedId = id;
   const item = state.items.find(i => i.id === id); if (!item) return;
   const [garment, modeled] = await Promise.all([cacheImage(item.imageKey), cacheImage(item.modeledKey)]);
+  const variants = await Promise.all((item.variants || []).map(async v => ({ ...v, src: await cacheImage(v.imageKey) })));
   if (request !== viewerRequest) return;
   if (editorEscapeHandler) { document.removeEventListener('keydown', editorEscapeHandler); editorEscapeHandler = null; }
   if (viewerEl) viewerEl.remove();
   document.body.classList.add('viewer-open'); $('#app-shell').classList.add('has-selection');
   viewerEl = productDetail(item, {
-    garment, modeled, mode: state.previewMode, close: closeViewer,
+    garment, modeled, variants: variants.filter(v => v.src), createVariant: color => tryOnItem(item, color), mode: state.previewMode, close: closeViewer,
     edit: () => buildViewer(item, garment, modeled),
     save: () => { store.save('items', state.items); renderGallery(); openViewer(id); },
     busy: tryingOn.has(id), tryOn: () => tryOnItem(item),
@@ -262,7 +264,8 @@ function closeViewer() {
     $('#gallery-grid').querySelectorAll('.product-open')[idx]?.focus({ preventScroll: true });
   });
 }
-async function tryOnItem(item) {
+async function tryOnItem(item, color = null) {
+  if (color !== null && !/^#[0-9a-f]{6}$/i.test(color)) return;
   if (tryingOn.has(item.id)) return;
   if (!requireSetup(true) || !canGenerate()) return;
   if (!item.imageKey) { notify(tr('Ergänze zuerst ein Produktfoto.', 'Add a product photo first.')); return; }
@@ -270,10 +273,13 @@ async function tryOnItem(item) {
   try {
     const [modelRef, garment] = await Promise.all([imageStore.get('model-reference'), cacheImage(item.imageKey)]);
     if (!garment) throw new Error(tr('Das Produktfoto fehlt. Bitte ergänzen.', 'The product photo is missing. Please add it.'));
-    const result = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt: ai.MODELED_PROMPT, images: [modelRef, garment], size: '1024x1536' });
+    const result = await generateImage({ key: state.settings.openaiKey, model: state.settings.imageModel, prompt: ai.MODELED_PROMPT + (color ? `\nCreate a color concept: change only the supplied garment main fabric color to ${color}. Preserve its cut, texture, print, logos and all other clothing. Preserve the reference person's identity.` : ''), images: [modelRef, garment], size: '1024x1536' });
 
     if (!state.items.includes(item)) return;
-    const key = 'modeled-' + item.id; await imageStore.put(key, result); imageCache.set(key, result); item.modeledKey = key;
+    const key = color ? 'variant-' + item.id + '-' + uid() : 'modeled-' + item.id;
+    await imageStore.put(key, result); imageCache.set(key, result);
+    if (color) { item.variants ||= []; item.variants.push({ color, imageKey: key }); }
+    else item.modeledKey = key;
     store.save('items', state.items); renderGallery(); notify(tr('Deine Anprobe ist fertig.', 'Your try-on is ready.'));
   } catch (e) { notify(e.message); }
   finally { tryingOn.delete(item.id); if (state.selectedId === item.id) openViewer(item.id); }
@@ -289,7 +295,8 @@ $('#product-photo-input').addEventListener('change', async e => {
     await imageStore.put(key, normalized); await imageStore.put(cropKey, normalized);
     imageCache.set(key, normalized); imageCache.set(cropKey, normalized);
     if (item.modeledKey) { await imageStore.delete(item.modeledKey); imageCache.delete(item.modeledKey); }
-    Object.assign(item, { imageKey: key, cropKey, modeledKey: null });
+    for (const variant of item.variants || []) { await imageStore.delete(variant.imageKey); imageCache.delete(variant.imageKey); }
+    Object.assign(item, { imageKey: key, cropKey, modeledKey: null, variants: [] });
     store.save('items', state.items); renderGallery();
     if (state.selectedId === item.id) openViewer(item.id);
     notify(tr('Produktfoto gespeichert. Bereit für die Anprobe.', 'Product photo saved. Ready to try on.'));
@@ -718,6 +725,7 @@ async function deleteItem(id) {
     if (item.imageKey) { imageStore.delete(item.imageKey); imageCache.delete(item.imageKey); }
     if (item.modeledKey) { imageStore.delete(item.modeledKey); imageCache.delete(item.modeledKey); }
     if (item.cropKey) { imageStore.delete(item.cropKey); imageCache.delete(item.cropKey); }
+    for (const v of item.variants || []) { imageStore.delete(v.imageKey); imageCache.delete(v.imageKey); }
   }
   state.items = state.items.filter((i) => i.id !== id);
   store.save('items', state.items);
@@ -866,8 +874,9 @@ $('#import-link-add').addEventListener('click', async () => {
   $('#import-link-add').disabled = true;
   try {
     let info = {};
+    try { info = await readProductPage(link); } catch {}
     if (state.settings.geminiKey) {
-      try { info = await analyzeShopUrl({ apiKey: state.settings.geminiKey, link }); }
+      try { const details = await analyzeShopUrl({ apiKey: state.settings.geminiKey, link }); info = { ...info, ...Object.fromEntries(Object.entries(details).filter(([, v]) => v != null)) }; }
       catch { notify(tr('Produktdetails nicht abrufbar. Der Link wird trotzdem gespeichert.', 'Product details unavailable. Saving the link anyway.')); }
     }
     const item = {
@@ -883,12 +892,19 @@ $('#import-link-add').addEventListener('click', async () => {
       palette: info.color ? [info.color] : [],
       link,
     };
+    if (info.imageUrl) {
+      try {
+        const photo = await ai.normalizeImage(await loadProductImage(info.imageUrl), 1280);
+        item.imageKey = 'garment-' + item.id;
+        await imageStore.put(item.imageKey, photo); imageCache.set(item.imageKey, photo);
+      } catch { item.imageKey = null; }
+    }
     state.items.unshift(item);
     store.save('items', state.items);
     $('#import-link').value = '';
     renderGallery(); renderCategoryNav();
     closeImport(); openViewer(item.id);
-    notify(tr('Gespeichert. Ergänze ein Produktfoto für die Anprobe.', 'Saved. Add a product photo to try it on.'));
+    notify(item.imageKey ? tr('Produktbild übernommen. Prüfe das Bild und starte die Anprobe.', 'Product image imported. Check the image and start your try-on.') : tr('Link gespeichert. Das Shop-Bild war nicht abrufbar. Ergänze ein Produktfoto.', 'Link saved. The shop image was unavailable. Add a product photo.'));
   } catch (e) { showImportError(e.message); }
   finally { $('#import-link-add').disabled = false; }
 });
@@ -1258,7 +1274,7 @@ const DEFAULT_PROFILE_FOR_ADVICE = {};
 function buildPieceCollage(imgSrcs) {
   const wrap = document.createElement('div');
   wrap.className = 'piece-collage';
-  imgSrcs.slice(0, 3).forEach((src, i) => {
+  imgSrcs.forEach((src, i) => {
     const img = document.createElement('img');
     img.src = src;
     img.style.setProperty('--i', i);
@@ -1377,12 +1393,19 @@ async function renderSuggestions() {
 }
 
 let lookDetailEl = null;
+let lookDetailRequest = 0;
+let lookReturnFocus = null;
 function closeLookDetail() {
+  lookDetailRequest++;
   if (lookDetailEl) { lookDetailEl.remove(); lookDetailEl = null; }
+  if (!viewerEl) document.body.classList.remove('viewer-open');
+  lookReturnFocus?.focus({ preventScroll: true });
 }
 
 async function openLookDetail(look) {
   closeLookDetail();
+  const request = ++lookDetailRequest;
+  lookReturnFocus = document.activeElement;
   const items = look.itemIds.map((id) => state.items.find((i) => i.id === id)).filter(Boolean);
   const meta = (look.description && look.tags) ? { description: look.description, tags: look.tags } : describeLook(items);
 
@@ -1393,23 +1416,31 @@ async function openLookDetail(look) {
   entry.className = 'viewer-entry';
   const photoSrc = look.imageKey ? await cacheImage(look.imageKey) : null;
   const aside = document.createElement('aside');
-  aside.className = 'viewer' + (photoSrc ? ' has-modeled-image' : '');
+  aside.className = 'viewer has-modeled-image outfit-drawer';
   aside.setAttribute('role', 'dialog');
   aside.setAttribute('aria-modal', 'true');
 
   const close = document.createElement('button');
   close.className = 'viewer-icon-close';
   close.innerHTML = icon('x', 24);
+  close.setAttribute('aria-label', tr('Schließen', 'Close'));
+  aside.setAttribute('aria-label', look.name);
   close.addEventListener('click', closeLookDetail);
   aside.appendChild(close);
 
+  const hero = document.createElement('div'); hero.className = 'outfit-detail-hero';
+  const pieceSrcs = (await Promise.all(items.map(item => cacheImage(item.imageKey)))).filter(Boolean);
+  const collage = buildPieceCollage(pieceSrcs); hero.append(collage);
   if (photoSrc) {
-    const photo = document.createElement('img');
-    photo.className = 'look-detail-photo';
-    photo.src = photoSrc;
-    photo.alt = look.name;
-    aside.appendChild(photo);
+    const photo = document.createElement('img'); photo.className = 'look-detail-photo hidden'; photo.src = photoSrc; photo.alt = look.name; hero.append(photo);
+    const tabs = document.createElement('div'); tabs.className = 'product-image-tabs';
+    for (const [kind, text] of [['pieces', tr('Kleidungsstücke', 'Pieces')], ['modeled', tr('An mir', 'On me')]]) {
+      const b = document.createElement('button'); b.className = 'secondary-button'; b.textContent = text; b.setAttribute('aria-pressed', String(kind === 'pieces'));
+      b.addEventListener('click', () => { collage.classList.toggle('hidden', kind !== 'pieces'); photo.classList.toggle('hidden', kind !== 'modeled'); tabs.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); }); tabs.append(b);
+    }
+    hero.append(tabs);
   }
+  aside.append(hero);
 
   const body = document.createElement('div');
   body.className = 'look-detail-body';
@@ -1435,10 +1466,11 @@ async function openLookDetail(look) {
   piecesWrap.className = 'look-detail-pieces';
   piecesWrap.innerHTML = `<p class="look-detail-pieces-label">${t('field.details')}</p>`;
   for (const item of items) {
-    const chip = document.createElement('span');
-    chip.className = 'detail-chip';
-    chip.innerHTML = `<span class="dot" style="background:${item.color}"></span>${escapeHtml(item.name)}`;
-    piecesWrap.appendChild(chip);
+    const chip = document.createElement('button'); chip.className = 'outfit-piece-link';
+    const src = await cacheImage(item.imageKey);
+    if (src) { const img = document.createElement('img'); img.src = src; img.alt = ''; chip.append(img); }
+    const label = document.createElement('span'); label.textContent = item.name; chip.append(label);
+    chip.addEventListener('click', () => { closeLookDetail(); openViewer(item.id); }); piecesWrap.append(chip);
   }
   body.appendChild(piecesWrap);
 
@@ -1502,8 +1534,19 @@ async function openLookDetail(look) {
 
   entry.appendChild(aside);
   overlay.appendChild(entry);
+  if (request !== lookDetailRequest) return;
+  overlay.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); closeLookDetail(); }
+    if (e.key === 'Tab') {
+      const controls = [...aside.querySelectorAll('button:not(:disabled)')];
+      const first = controls[0], last = controls.at(-1);
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+  document.body.classList.add('viewer-open');
   document.body.appendChild(overlay);
-  lookDetailEl = overlay;
+  lookDetailEl = overlay; close.focus();
 }
 
 async function renderLooks() {
@@ -1534,7 +1577,7 @@ async function renderLooks() {
     card.className = 'look-card';
     card.tabIndex = 0;
     card.addEventListener('click', () => openLookDetail(look));
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLookDetail(look); } });
+    card.addEventListener('keydown', (e) => { if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openLookDetail(look); } });
 
     const media = document.createElement('div');
     media.className = 'look-card-media';
@@ -1566,7 +1609,11 @@ async function renderLooks() {
       store.save('looks', state.looks);
       renderLooks();
     });
-    bodyEl.append(name, fav, del);
+    const preview = document.createElement('button'); preview.textContent = tr('Teile', 'Pieces'); preview.setAttribute('aria-pressed', 'false');
+    preview.addEventListener('click', e => { e.stopPropagation(); const active = card.classList.toggle('show-pieces'); preview.setAttribute('aria-pressed', String(active)); });
+    fav.setAttribute('aria-label', tr('Favorit', 'Favorite')); del.setAttribute('aria-label', tr('Outfit löschen', 'Delete outfit'));
+    if (!src) card.classList.add('show-pieces');
+    bodyEl.append(name, preview, fav, del);
     card.appendChild(bodyEl);
     grid.appendChild(card);
   }
@@ -1638,6 +1685,7 @@ function collectImageKeys() {
     if (item.imageKey) keys.add(item.imageKey);
     if (item.modeledKey) keys.add(item.modeledKey);
     if (item.cropKey) keys.add(item.cropKey);
+    for (const variant of item.variants || []) if (variant.imageKey) keys.add(variant.imageKey);
   }
   for (const look of state.looks) {
     if (look.imageKey) keys.add(look.imageKey);
@@ -1807,6 +1855,10 @@ function applyTheme(theme) {
   const meta = $('#theme-color-meta');
   if (meta) meta.setAttribute('content', theme === 'dark' ? '#171611' : '#f4f0e8');
   $('#toggle-theme').innerHTML = icon(theme === 'dark' ? 'sun' : 'moon', 17);
+  $('#toggle-theme').setAttribute('aria-label', tr('Dunkelmodus', 'Dark mode'));
+  $('#toggle-theme').setAttribute('aria-pressed', String(theme === 'dark'));
+  $('#toggle-theme').title = theme === 'dark' ? tr('Zum Hellmodus', 'Use light mode') : tr('Zum Dunkelmodus', 'Use dark mode');
+  $('#set-theme').value = theme;
 }
 // Alle sichtbaren Texte neu setzen (statisch + dynamische Ansichten)
 function applyLang() {

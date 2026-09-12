@@ -89,3 +89,13 @@ Für eine spätere serverseitige KI-Anbindung: authentifizierte Worker-Endpunkte
 ### Prüfung
 
 `node --test tests/catalog.test.mjs` prüft Sammlungen, Suche, Sortierung, sichere Shop-Links und den schlüsselfreien Export. `node scripts/package-static.mjs` prüft und paketiert die statischen Assets. `node scripts/check-static.mjs` prüft JavaScript-Syntax, Modulimporte, eindeutige HTML-IDs und lokale Assets.
+
+### Referenzansicht und Farbideen
+
+- Hell-/Dunkelmodus ist direkt im Kopfbereich auch auf dem Handy erreichbar und wird gespeichert.
+- Outfit-Hover zeigt alle enthaltenen Produktbilder vor der ausgeblendeten Anprobe. Der Schalter „Teile“ bietet dieselbe Vorschau auf Touch-Geräten.
+- Outfit-Details öffnen rechts mit einer Teileübersicht und dem Umschalter „An mir“. Ein Klick auf ein Kleidungsstück öffnet seine Produktansicht.
+- Die Produkt-Seitenleiste zeigt die Anprobe, das Produktbild und auf Wunsch separat gespeicherte KI-Farbideen. Diese bestätigen keine Shop-Verfügbarkeit. Generierung erfolgt ausschließlich per Klick, zählt zum bestehenden Nutzungslimit und verändert das Original nicht. Backups enthalten auch Farbideen.
+- Linkimport versucht zunächst Titel und Vorschaubild aus Open-Graph-/Twitter-Metadaten zu laden. Optional ergänzt Gemini die Produktdaten und Bild-URL. Browser-CORS, gesperrte Seiten oder nicht abrufbare Bilder führen zur manuellen Fotoergänzung; der Link bleibt gespeichert. Automatisches Importieren aus jedem Shop ist ohne serverseitige Anbindung nicht gewährleistet.
+
+Prüfung: `npm install` und `npm test` (Node 22 oder neuer) für Katalog- und DOM-Integrationstests. `npm run check` prüft statische Assets und Syntax. KI-Antworten und Shopzugriffe werden simuliert; die Tests prüfen weder echte Bildqualität noch Browserlayout.
