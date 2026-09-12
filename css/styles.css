@@ -1038,7 +1038,7 @@ button { font: inherit; }
 .look-card:hover,
 .look-card:focus-within { border-color: var(--ink); }
 .look-card-media { position: relative; aspect-ratio: 2/3; overflow: hidden; }
-.look-card-media img { display: block; width: 100%; height: 100%; object-fit: cover; transition: opacity 320ms ease; }
+.look-card-media > img { display: block; width: 100%; height: 100%; object-fit: cover; transition: opacity 320ms ease; }
 .look-card-pieces {
   position: absolute;
   inset: 0;
@@ -1048,10 +1048,10 @@ button { font: inherit; }
   pointer-events: none;
 }
 @media (hover: hover) {
-  .look-card:hover .look-card-media img { opacity: .18; }
+  .look-card:hover .look-card-media > img { opacity: .18; }
   .look-card:hover .look-card-pieces { opacity: 1; }
 }
-.look-card:active .look-card-media img { opacity: .18; }
+.look-card:active .look-card-media > img { opacity: .18; }
 .look-card:active .look-card-pieces { opacity: 1; }
 .look-card .look-card-body { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .look-card .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
@@ -1393,3 +1393,36 @@ html.locked .app-shell { visibility: hidden; }
   .product-main-actions { position: relative; }
 }
 @media (prefers-reduced-motion: reduce) { .product-media img { transition: none; } }
+
+/* Reference shop: right drawers, flat-lay hover and visible theme control. */
+.header-tools > #toggle-theme { display: inline-flex; min-width: 44px; min-height: 44px; }
+.product-overlay { padding: 0; align-items: stretch; justify-content: flex-end; }
+.product-dialog { width: min(520px, 100%); max-height: 100dvh; height: 100dvh; display: block; border-radius: 0; animation: viewer-in 240ms ease both; }
+.product-detail-media { position: relative; padding: 28px 24px 16px; }
+.product-picture { height: min(52dvh, 520px); aspect-ratio: auto; }
+.product-picture img { max-height: 100%; }
+.product-inset { position: absolute; right: 28px; bottom: 78px; width: 24%; height: 110px; object-fit: contain; background: var(--paper); border: 1px solid var(--line); }
+.product-detail-content { padding: 24px; }
+.product-variants { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 16px; }
+.product-variants h3 { font-size: 16px; font-weight: 500; }
+.variant-picker { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+.variant-picker input { width: 48px; height: 44px; }
+.variant-previews { display: flex; overflow-x: auto; gap: 10px; margin-top: 16px; }
+.variant-preview { flex: 0 0 90px; padding: 4px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); cursor: pointer; }
+.variant-preview img { width: 100%; height: 110px; object-fit: contain; }
+.variant-preview[aria-pressed="true"] { border: 2px solid var(--ink); }
+.piece-collage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); place-items: center; gap: 12px; padding: 24px; }
+.piece-collage img { position: static; width: 100%; height: 100%; max-height: 260px; min-height: 0; object-fit: contain; transform: none; background: none; border: 0; border-radius: 0; box-shadow: none; }
+.piece-collage img:only-child { grid-column: 1 / -1; }
+.look-card-pieces { background: color-mix(in srgb, var(--paper) 88%, transparent); }
+.look-card:focus-visible .look-card-pieces, .look-card.show-pieces .look-card-pieces { opacity: 1; }
+.look-card:focus-visible .look-card-media > img, .look-card.show-pieces .look-card-media > img { opacity: .18; }
+.look-card-pieces img { opacity: 1; }
+.outfit-detail-hero { padding-top: 36px; }
+.outfit-detail-hero > .piece-collage { height: min(58dvh, 570px); }
+.outfit-detail-hero .look-detail-photo { height: min(58dvh, 570px); object-fit: contain; }
+.outfit-piece-link { display: flex; align-items: center; gap: 16px; width: 100%; padding: 12px 0; background: none; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); text-align: left; cursor: pointer; }
+.outfit-piece-link img { width: 64px; height: 78px; object-fit: contain; }
+.outfit-drawer :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 640px) { .product-dialog { width: 100%; } .piece-collage { padding: 16px; } }
+@media (prefers-reduced-motion: reduce) { .product-dialog { animation: none; } .look-card-media > img, .look-card-pieces { transition: none; } }
